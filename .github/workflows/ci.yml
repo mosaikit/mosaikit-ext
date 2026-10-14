@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2026 Massimo Antonini
+# SPDX-License-Identifier: MPL-2.0
+#
+# Checks of the repository: the requirements (schema, ids, dependencies, also on the requirements
+# of Mosaikit) and the licence information of every file (REUSE). Actions are pinned by commit.
+
+name: CI
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  requirements:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: mosaikit/mosaikit
+          path: .mosaikit
+          sparse-checkout: docs/requirements
+      - name: Requirements
+        env:
+          MOSAIKIT_REQUIREMENTS: .mosaikit/docs/requirements
+        run: |
+          python3 -m pip install --quiet pyyaml jsonschema
+          python3 docs/requirements/check.py
+      - name: Licences (REUSE)
+        run: |
+          rm -rf .mosaikit
+          python3 -m pip install --quiet reuse
+          python3 -m reuse lint

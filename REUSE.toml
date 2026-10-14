@@ -1,0 +1,6 @@
+version = 1
+
+[[annotations]]
+path = ["**/*.md", "**/*.json", "**/*.yaml", "**/*.yml", "**/*.toml", ".gitignore", ".gitattributes", "**/*.svg", "**/*.png"]
+SPDX-FileCopyrightText = "2026 Massimo Antonini"
+SPDX-License-Identifier = "MPL-2.0"

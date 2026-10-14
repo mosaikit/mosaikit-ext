@@ -1,0 +1,5 @@
+{
+  "prefix": "EXT",
+  "dependsOn": ["MK"],
+  "areas": ["files", "connections", "dashboards", "processes", "common"]
+}
