@@ -1,7 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Massimo Antonini
 # SPDX-License-Identifier: MPL-2.0
-"""Checks the requirements of this repository (docs/requirements/EXT-nnn.md), as the requirements test
-of Mosaikit does for its own:
+"""Checks the requirements of this repository, as the requirements test of Mosaikit does for its own.
+A requirement lives in the folder of the extension that implements it
+(ext-<name>/docs/requirements/EXT-nnn.md, ADR-0001), or in docs/requirements when it spans several
+extensions or the whole repository; every docs/requirements folder of the repository is read.
 
 - the front matter follows docs/requirements/requirement.schema.json (a copy of the one of Mosaikit),
   the file is named after the id, the id has the prefix and the area is one of requirements.json,
@@ -27,6 +29,9 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DIRECTORY = os.path.join(ROOT, "docs", "requirements")
 FRONT_MATTER = re.compile(r"^---\n(.*?)\n---\n(.*)$", re.S)
+# Folders never searched for requirements: dependencies and builds, and those starting with a dot
+# (.git, and the clone of Mosaikit that the CI puts in .mosaikit).
+SKIPPED = ("node_modules", "target")
 TEST_FILES = re.compile(r"(\.spec\.ts|\.test\.ts|\.e2e\.ts|Test\.java|IT\.java)$")
 
 
@@ -38,12 +43,25 @@ def read(path: str) -> tuple[dict, str]:
     return yaml.safe_load(m.group(1)) or {}, m.group(2)
 
 
+def requirement_files(root: str, pattern: str) -> list[tuple[str, str]]:
+    """(file name, path) of every file named after `pattern` in a docs/requirements folder under root."""
+    found = []
+    for base, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in SKIPPED and not d.startswith("."))
+        if os.path.basename(base) == "requirements" and os.path.basename(os.path.dirname(base)) == "docs":
+            found += [(name, os.path.join(base, name)) for name in sorted(files) if re.match(pattern, name)]
+    return found
+
+
 def platform_ids() -> set[str] | None:
     directory = os.environ.get("MOSAIKIT_REQUIREMENTS",
                                os.path.join(os.path.dirname(ROOT), "mosaikit", "docs", "requirements"))
     if not os.path.isdir(directory):
         return None
-    return {name[:-3] for name in os.listdir(directory) if re.match(r"^MK-\d{3,}\.md$", name)}
+    # A docs/requirements folder stands for its repository, wherever else its requirements are.
+    if os.path.normpath(directory).replace(os.sep, "/").endswith("docs/requirements"):
+        directory = os.path.dirname(os.path.dirname(os.path.normpath(directory)))
+    return {name[:-3] for name, _ in requirement_files(directory, r"^MK-\d{3,}\.md$")}
 
 
 def cited_by_tests(prefix: str) -> set[str]:
@@ -65,11 +83,10 @@ def main() -> int:
     own = re.compile(rf"^{prefix}-\d{{3,}}$")
     errors: list[str] = []
     requirements: dict[str, dict] = {}
-    for name in sorted(os.listdir(DIRECTORY)):
-        if not re.match(r"^[A-Z]{2,4}-\d{3,}\.md$", name):
-            continue
+    for name, path in requirement_files(ROOT, r"^[A-Z]{2,4}-\d{3,}\.md$"):
+        where_file = os.path.relpath(path, ROOT).replace(os.sep, "/")
         try:
-            meta, body = read(os.path.join(DIRECTORY, name))
+            meta, body = read(path)
         except (ValueError, yaml.YAMLError) as e:
             errors.append(f"{name}: {e}")
             continue
@@ -85,7 +102,9 @@ def main() -> int:
             errors.append(f"{name}: area {meta.get('area')} is not one of requirements.json")
         if len(body.strip()) <= 10:
             errors.append(f"{name}: the body is empty")
-        requirements[str(rid)] = meta
+        if str(rid) in requirements:
+            errors.append(f"{where_file}: {rid} is also in {requirements[str(rid)]['_file']}")
+        requirements[str(rid)] = {**meta, "_file": where_file}
     platform = platform_ids()
     for rid, meta in requirements.items():
         for d in list(meta.get("depends") or []) + ([meta["moved-to"]] if meta.get("moved-to") else []):

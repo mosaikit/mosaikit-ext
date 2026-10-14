@@ -12,8 +12,8 @@ is and gives the naming rule (`ext-<extension>[-<sub>]`, manifest id
 `io.github.mosaikit.ext.<extension>[.<sub>]`).
 
 ```
-docs/requirements/  EXT-nnn.md, one per requirement (format of Mosaikit), and check.py that checks them
-ext-*/              one folder per extension, when its code arrives
+docs/requirements/  EXT-nnn.md that span several extensions (format of Mosaikit), and check.py that checks them all
+ext-*/              one folder per extension: README and docs/requirements/ now, its code when it arrives
 ```
 
 ## Rules
@@ -38,8 +38,10 @@ ext-*/              one folder per extension, when its code arrives
   present (MK-132), checks the presence of the others (MK-133), talks to them only through published
   contracts (MK-134), and shows a placeholder for a reference to a resource of an absent extension
   (MK-135). Libraries travel inside the extension that needs them (MK-131).
-- **Requirements** are `docs/requirements/EXT-nnn.md`; `python docs/requirements/check.py` checks
-  them, also against the requirements of Mosaikit when it is cloned next to this repository. Every
+- **Requirements** are `EXT-nnn.md`, in `ext-<name>/docs/requirements/` when their acceptance is
+  implemented entirely inside that extension, in `docs/requirements/` when they span several
+  extensions or the whole repository; the id never changes when one moves. `python
+  docs/requirements/check.py` checks every `docs/requirements` folder of the repository, also against the requirements of Mosaikit when it is cloned next to this repository. Every
   change is linked to a requirement. What the platform lacks becomes an MK requirement in Mosaikit,
   cited in `depends`. A requirement is `done` when tests tagged with its id (`@Tag("EXT-nnn")`,
   `EXT-nnn` in the title of a test) cover its acceptance; its `## History` gets a line either way.

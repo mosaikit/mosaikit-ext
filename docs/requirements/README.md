@@ -37,6 +37,19 @@ Why it is wanted and what it covers.
 acceptance is verified by tests), `dropped` (no longer wanted, the body says why), `moved` (carried on
 by `moved-to`).
 
+## Where a requirement lives
+
+- In the folder of an extension, `ext-<name>/docs/requirements/EXT-nnn.md`, when its acceptance is
+  implemented entirely inside that extension (ADR-0001: each folder holds everything of its
+  extension). A connector is an extension of its own: `ext-catalog-connection-kafka/docs/requirements/`.
+- Here, `docs/requirements/EXT-nnn.md`, when it spans several extensions (a resource of one created
+  from a connection, the common cards and headers, several connectors at once) or concerns the
+  repository as a whole (its layout, publication and CI).
+
+The id never changes when a requirement moves between folders; `check.py` reads every
+`docs/requirements` folder of the repository (not `node_modules` nor `target`) and refuses an id found
+twice. `requirements.json` and the schema stay here, and hold for all of them.
+
 ## Areas and extensions
 
 | Area | Extension |

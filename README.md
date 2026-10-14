@@ -11,8 +11,9 @@ on Mosaikit need, written once and composed by each product next to its own exte
 | `ext-dashboards` | `io.github.mosaikit.ext.dashboards` | dashboards: the builder, the widget catalog, sources read from the connections, cross filters |
 | `ext-processes` | `io.github.mosaikit.ext.processes` | the visual process editor and its server executor: runs, schedules, versions, reports |
 
-The repository holds the requirements first (`docs/requirements/`); the code of the extensions comes
-next, one folder per extension at the root.
+Each extension has a folder of its own at the root, holding its requirements first
+(`ext-<name>/docs/requirements/`) and its code when it arrives (ADR-0001); the requirements that span
+several extensions are in `docs/requirements/`.
 
 ## Naming
 
@@ -40,8 +41,9 @@ None of these extensions knows the products that use it.
 
 ## Requirements
 
-`docs/requirements/EXT-nnn.md`, one file per requirement, in the format of the requirements of
-Mosaikit; `python docs/requirements/check.py` checks them (`pip install pyyaml jsonschema`). See
+`EXT-nnn.md`, one file per requirement, in the format of the requirements of Mosaikit: in
+`ext-<name>/docs/requirements/` for the requirements of one extension, in `docs/requirements/` for
+those that span several; `python docs/requirements/check.py` checks them all (`pip install pyyaml jsonschema`). See
 [docs/requirements/README.md](docs/requirements/README.md).
 
 ## Licence
