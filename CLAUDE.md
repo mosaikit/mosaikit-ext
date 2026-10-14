@@ -30,6 +30,10 @@ ext-*/              one folder per extension, when its code arrives
   that cannot carry a header are covered by `REUSE.toml`. `reuse lint` must pass.
 - **Commits** follow Conventional Commits and are signed off (`git commit -s`, DCO). Never
   `git add -A` in a tree another session may share; never a bare `git stash`.
+- **One repository, independent extensions** (ADR-0001, `docs/adr/`): each `ext-*` folder is self-contained
+  (build, tests, changelog, README, requirements), is published as its own package from a tag
+  `ext-<name>/vX.Y.Z`, and never refers to files outside its folder, so it can move to a repository
+  of its own without rework.
 - **Independent extensions.** An extension declares what it requires and what it only uses when
   present (MK-132), checks the presence of the others (MK-133), talks to them only through published
   contracts (MK-134), and shows a placeholder for a reference to a resource of an absent extension
