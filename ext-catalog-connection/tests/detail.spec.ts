@@ -84,15 +84,22 @@ test.describe('EXT-016 the detail of a connection opens as a panel over the list
     expect(await cards.evaluateAll((all) => all.map((element) => JSON.stringify(element.getBoundingClientRect())))).toEqual(before);
   });
 
-  test('EXT-016 the facts stay in place while the list of the pieces scrolls, and the actions stay at the bottom', async ({ page }) => {
-    await page.setViewportSize({ width: 1600, height: 420 });
+  test('EXT-016 the facts and tags stay in place while the list of the pieces scrolls, and the actions stay at the bottom', async ({ page }) => {
     const connection = await create(unique('002 Detail facts'), 'The orders of the shop.');
+    const tagged = await api(member(), `${API}/connections/${connection.id}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags: ['orders', 'shop'] }),
+    });
+    expect(tagged.status, JSON.stringify(tagged.body)).toBe(200);
     await openConnections(page);
     await card(page, connection.name).click();
     const panel = detail(page, connection.name);
     const contents = panel.getByRole('region', { name: `Contents of ${connection.name}` });
     await contents.getByRole('button', { name: 'sales', exact: true }).click();
     await expect(contents.locator('ul.entries > li .name')).toHaveText(['customers', 'orders']);
+    // A window low enough that the pieces have about 40 pixels to scroll in.
+    const room = await panel.locator('.parts').evaluate((element) => element.clientHeight);
+    await page.setViewportSize({ width: 1600, height: 900 - room + 40 });
 
     // The facts of the connection.
     const facts = panel.locator('dl.facts');
@@ -101,8 +108,11 @@ test.describe('EXT-016 the detail of a connection opens as a panel over the list
     await expect(facts.locator('[data-fact="description"]')).toHaveText('The orders of the shop.');
     await expect(facts.locator('[data-fact="address"]')).toHaveText('sample://db.example.org');
     await expect(facts.locator('[data-fact="owner"]')).not.toBeEmpty();
-    // The place of the tags, in the part that stays in place (they come with EXT-012).
-    await expect(panel.locator('[data-slot="tags"]')).toHaveCount(1);
+    // The labels: type, category and the free tags of the connection (EXT-012).
+    const tags = panel.locator('[data-slot="tags"]');
+    await expect(tags.locator('.label.type')).toHaveText('Sample source');
+    await expect(tags.locator('.label.category')).toHaveText('Database');
+    await expect(tags.locator('.label.tag > span')).toHaveText(['orders', 'shop']);
 
     // Only the pieces scroll: the panel itself does not.
     const parts = panel.locator('.parts');
@@ -114,6 +124,7 @@ test.describe('EXT-016 the detail of a connection opens as a panel over the list
     const fixed = async () => ({
       head: await box(panel.getByRole('heading', { name: connection.name, level: 2 })),
       facts: await box(facts),
+      tags: await box(tags),
       actions: await box(actions),
     });
     const before = await fixed();

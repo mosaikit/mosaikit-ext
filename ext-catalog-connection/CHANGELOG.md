@@ -29,6 +29,11 @@ and the versions [Semantic Versioning](https://semver.org/).
   selection box counted in the header, the pieces at the top level of the source and its state as last
   tested or listed (migration V3, fields `updated`, `pieces`, `morePieces`, `state` and `checked` of a
   connection), the last update, and a header with the order (most recent first, or by name).
+- Connections carry a type, a category and free tags (EXT-012): the card and the detail show the type
+  of the connector, which cannot be removed, its category, and the free tags kept by the kernel (MK-097),
+  written and removed in the detail with suggestions of the tags in use; a Tags filter next to the Type
+  one, a type and a tag giving the intersection and two tags the union.
+  `PUT /api/v1/ext/connections/connections/{id}/tags` and `GET /api/v1/ext/connections/tags`.
 - The detail of a connection opens as a panel over the list (EXT-016): on the right edge of the app,
   without moving the cards, with the facts of the connection fixed while its pieces scroll and its
   actions (edit, test) at the bottom; the open card is marked and has `aria-current`, and the panel

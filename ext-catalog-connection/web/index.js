@@ -141,7 +141,18 @@ const STYLE = `
              margin: 0; padding: 12px 16px; font-size: 13px; }
   dl.facts dt { color: var(--mk-muted); }
   dl.facts dd { margin: 0; overflow-wrap: anywhere; }
-  .tags { flex: none; padding: 0 16px 8px; }
+  .tags { flex: none; display: grid; gap: 8px; padding: 0 16px 12px; }
+  ul.labels { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; }
+  ul.labels .label { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; padding: 1px 8px;
+                     border-radius: 999px; border: 1px solid var(--mk-line); }
+  ul.labels .label.type { background: var(--mk-bg); border-color: var(--mk-fg); font-weight: 600; }
+  ul.labels .label.category { border-style: dashed; color: var(--mk-muted); }
+  ul.labels .label.tag { background: var(--mk-accent-soft, var(--mk-surface)); }
+  ul.labels .label.tag::before { content: '#'; color: var(--mk-muted); }
+  ul.labels .label img.logo { width: 14px; height: 14px; }
+  ul.labels button.remove { border: 0; background: none; padding: 0 2px; line-height: 1; color: var(--mk-muted); }
+  form.add-tag { display: flex; gap: 6px; }
+  form.add-tag input { min-width: 0; flex: 1; }
   aside.detail section.contents { flex: 1; min-height: 0; display: flex; flex-direction: column;
                                   padding: 8px 16px 0; border-top: 1px solid var(--mk-line); }
   aside.detail h3 { flex: none; font-size: 15px; margin: 4px 0 8px; }
@@ -208,7 +219,7 @@ const extension = {
               <button type="button" class="close"></button>
             </header>
             <dl class="facts"></dl>
-            <div class="tags" data-slot="tags" hidden></div>
+            <div class="tags" data-slot="tags" role="group"></div>
             <section class="contents" aria-labelledby="contents-title">
               <h3 id="contents-title"></h3>
               <nav class="path"><ol></ol></nav>
@@ -234,7 +245,16 @@ const extension = {
         this.thumbnails = new Map();
         this.list = new ListPage(root.querySelector('.list'), {
           key: (connection) => connection.id,
-          facets: [{ id: 'type', title: t('facetType'), values: (connection) => [{ value: connection.type, label: this.typeTitle(connection) }] }],
+          // Types and tags are two columns: what kind a connection is, and what it is about (EXT-012).
+          facets: [
+            { id: 'type', title: t('facetType'), values: (connection) => [{ value: connection.type, label: this.typeTitle(connection) }] },
+            {
+              id: 'tag',
+              title: t('facetTags'),
+              none: t('noTags'),
+              values: (connection) => (connection.tags ?? []).map((tag) => ({ value: tag, label: tag })),
+            },
+          ],
           card: (connection) => this.card(connection),
           rendered: () => this.refreshSelection(),
           // Most recent first by default, then by name (EXT-014).
@@ -247,6 +267,7 @@ const extension = {
             { title: t('columnDescription'), cell: (connection) => subtitle(connection) },
             { title: t('columnType'), cell: (connection) => this.kind(connection) },
             { title: t('columnCategory'), cell: (connection) => this.categoryOf(connection) },
+            { title: t('columnTags'), cell: (connection) => (connection.tags ?? []).join(', ') },
             { title: t('columnSize'), cell: (connection) => this.size(connection) },
             { title: t('columnUpdated'), cell: (connection) => this.updated(connection) },
             { title: t('columnStatus'), cell: (connection) => this.state(connection) },
@@ -345,7 +366,14 @@ const extension = {
       /** Every connection the person views, as cards or rows, filtered by type (EXT-011). */
       renderConnections(connections) {
         this.connections = connections;
+        // Drawing the list again keeps the keyboard where it was: on the name or the box of a card.
+        const focused = this.root.activeElement;
+        const holder = focused?.closest?.('.list [data-id]');
+        const kept = holder && ['button[aria-controls="detail"]', 'input.select'].find((selector) => focused.matches(selector));
         this.list.setItems(connections);
+        if (kept) {
+          this.root.querySelector(`.list [data-id="${CSS.escape(holder.dataset.id)}"] ${kept}`)?.focus();
+        }
         // The detail open stays open with what was read again, or closes when the connection is gone.
         if (this.selected) {
           const current = connections.find((connection) => connection.id === this.selected);
@@ -406,7 +434,7 @@ const extension = {
           // platform says what is missing (MK-135), and the app which connector brings it back.
           body.append(placeholder(connection, t, context.locale), subtitle(connection));
         }
-        body.append(this.kind(connection));
+        body.append(this.labels(connection));
         const measures = document.createElement('p');
         measures.className = 'measures';
         measures.append(this.size(connection), this.updated(connection));
@@ -584,10 +612,114 @@ const extension = {
               return [name, text];
             }),
         );
-        // The tags of the connection come with the tags of the platform (EXT-012 on MK-097): until then
-        // their place in the detail stays empty and hidden.
-        const tags = this.root.querySelector('aside.detail .tags');
-        tags.setAttribute('aria-label', t('factTags'));
+        this.renderTags(connection);
+      }
+
+      /**
+       * The labels of a connection in its detail (EXT-012): its type and its category, which come from
+       * its connector and cannot be removed, and its free tags, which a person who edits it adds and
+       * removes; the kernel keeps them lowercase, each once (MK-097).
+       */
+      renderTags(connection) {
+        const t = this.t;
+        const place = this.root.querySelector('aside.detail .tags');
+        place.setAttribute('aria-label', t('factTags'));
+        place.replaceChildren(this.labels(connection, true));
+        if (!connection.editable) {
+          return;
+        }
+        const form = document.createElement('form');
+        form.className = 'add-tag';
+        const field = input('text', 'tag', false);
+        field.maxLength = 48;
+        field.setAttribute('aria-label', t('addTag'));
+        field.placeholder = t('addTag');
+        field.setAttribute('list', 'tag-suggestions');
+        const suggestions = document.createElement('datalist');
+        suggestions.id = 'tag-suggestions';
+        field.addEventListener('input', () => this.suggest(field.value, suggestions));
+        const add = button(t('add'), null);
+        add.type = 'submit';
+        form.append(field, suggestions, add);
+        form.onsubmit = async (event) => {
+          event.preventDefault();
+          const typed = field.value.trim();
+          if (typed) {
+            await this.saveTags(connection, [...(connection.tags ?? []), typed]);
+            this.root.querySelector('aside.detail form.add-tag input[name="tag"]')?.focus();
+          }
+        };
+        place.append(form);
+      }
+
+      /**
+       * The labels of a connection, three kinds that look different (EXT-012): its type (a fact of its
+       * connector, never removed), its category (from the taxonomy of the connectors) and its free
+       * tags; with `removable`, each free tag has a button that removes it.
+       */
+      labels(connection, removable = false) {
+        const t = this.t;
+        const list = document.createElement('ul');
+        list.className = 'labels';
+        list.setAttribute('aria-label', t('labelsOf', connection));
+        const label = (kind, text) => {
+          const item = document.createElement('li');
+          item.className = `label ${kind}`;
+          item.dataset.label = kind;
+          const words = document.createElement('span');
+          words.textContent = text;
+          item.append(words);
+          return item;
+        };
+        const type = label('type', this.typeTitle(connection));
+        const connector = this.connectorOf(connection);
+        if (connector) {
+          type.prepend(logo(connector));
+        }
+        list.append(type);
+        const category = this.categoryOf(connection);
+        if (category) {
+          list.append(label('category', category));
+        }
+        for (const tag of connection.tags ?? []) {
+          const item = label('tag', tag);
+          if (removable && connection.editable) {
+            const remove = button('\u00d7', () => this.saveTags(connection, connection.tags.filter((other) => other !== tag)), 'remove');
+            remove.setAttribute('aria-label', t('removeTag', { tag }));
+            item.append(remove);
+          }
+          list.append(item);
+        }
+        return list;
+      }
+
+      /** Saves the free tags of a connection and shows them on its card and in its detail. */
+      async saveTags(connection, tags) {
+        try {
+          const saved = await call(`/connections/${encodeURIComponent(connection.id)}/tags`, {
+            method: 'PUT',
+            body: JSON.stringify({ tags }),
+          });
+          this.renderConnections((this.connections ?? []).map((other) => (other.id === saved.id ? saved : other)));
+        } catch (error) {
+          this.status(this.t('failed', { message: error.message }), true);
+        }
+      }
+
+      /** The tags in use that start with what the person types, offered under the field. */
+      async suggest(prefix, list) {
+        try {
+          const { tags } = await call(`/tags?prefix=${encodeURIComponent(prefix.trim())}`);
+          list.replaceChildren(
+            ...tags.map((tag) => {
+              const option = document.createElement('option');
+              option.value = tag;
+              return option;
+            }),
+          );
+        } catch {
+          // No suggestions: the person types the whole tag.
+        }
       }
 
       /** The actions on a connection, fixed at the bottom of its detail. */

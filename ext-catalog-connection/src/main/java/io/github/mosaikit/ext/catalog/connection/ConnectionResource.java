@@ -8,6 +8,7 @@ import dev.mosaikit.kernel.api.files.StoredFile;
 import dev.mosaikit.kernel.api.resource.Resource;
 import dev.mosaikit.kernel.api.resource.ResourceRef;
 import dev.mosaikit.kernel.api.resource.Resources;
+import dev.mosaikit.kernel.api.resource.Tags;
 import dev.mosaikit.kernel.api.secrets.SecretValue;
 import dev.mosaikit.kernel.api.secrets.Secrets;
 import dev.mosaikit.kernel.api.secrets.SecretsUnavailableException;
@@ -63,7 +64,8 @@ import java.util.function.Function;
  * <p>Each connection is a resource of the kernel (MK-054), owned by the person who creates it and
  * shared with the dialog of the platform (MK-055): a person lists the connections they view, browses
  * and tests those they use, and changes those they edit. A connection has a description, the address
- * of its source and a thumbnail (EXT-011, EXT-015).
+ * of its source and a thumbnail (EXT-011, EXT-015), and free tags, kept by the kernel with the
+ * generic tags of the platform (EXT-012, MK-097).
  */
 @Path("/api/v1/ext/connections")
 @Produces(MediaType.APPLICATION_JSON)
@@ -164,6 +166,7 @@ public class ConnectionResource {
      * @param state {@code reachable} or {@code unreachable} at the last test or listing of its source,
      *     {@code null} before
      * @param checked when its source was last tested or listed, {@code null} before
+     * @param tags its free tags, lowercase and each once, in alphabetical order (EXT-012)
      */
     public record ConnectionView(
             UUID id,
@@ -183,7 +186,17 @@ public class ConnectionResource {
             Integer pieces,
             boolean morePieces,
             String state,
-            Instant checked) {}
+            Instant checked,
+            List<String> tags) {}
+
+    /** The free tags of a connection, to replace them all (EXT-012). */
+    public record TagsChange(List<String> tags) {}
+
+    /** The tags in use that start with what a person types, the most used first (EXT-012). */
+    public record TagSuggestions(List<String> tags) {}
+
+    /** The most suggestions of tags the app asks for. */
+    static final int SUGGESTIONS = 20;
 
     /**
      * A page of the contents of a connection, in the one shape of every connector (EXT-019).
@@ -226,6 +239,7 @@ public class ConnectionResource {
     private final Sharing sharing;
     private final People people;
     private final FileStorage files;
+    private final Tags tags;
 
     public ConnectionResource(
             Connections connections,
@@ -235,7 +249,8 @@ public class ConnectionResource {
             Resources resources,
             Sharing sharing,
             People people,
-            FileStorage files) {
+            FileStorage files,
+            Tags tags) {
         this.connections = connections;
         this.catalog = catalog;
         this.organization = organization;
@@ -244,6 +259,7 @@ public class ConnectionResource {
         this.sharing = sharing;
         this.people = people;
         this.files = files;
+        this.tags = tags;
     }
 
     /** The types of source of the connectors active in the organization, and the connectors refused. */
@@ -405,6 +421,35 @@ public class ConnectionResource {
         connection.touch(Instant.now());
         connections.update(connection);
         return view(connection, catalog.discover());
+    }
+
+    /**
+     * Replaces the free tags of a connection that the person edits (EXT-012): the kernel keeps them
+     * lowercase, each once. The type and the category are not tags: they come from the connector.
+     */
+    @PUT
+    @Path("connections/{id}/tags")
+    @Transactional
+    public ConnectionView replaceTags(@PathParam("id") UUID id, TagsChange request) {
+        Connection connection = find(id, EDIT);
+        try {
+            tags.replace(ref(id), request == null || request.tags() == null ? List.of() : request.tags());
+        } catch (IllegalArgumentException e) {
+            throw problem(Response.Status.BAD_REQUEST, e.getMessage());
+        }
+        connection.touch(Instant.now());
+        connections.update(connection);
+        return view(connection, catalog.discover());
+    }
+
+    /**
+     * The tags in use in the organization that start with what the person types, drawn by the kernel
+     * from the resources the person may read, of any extension.
+     */
+    @GET
+    @Path("tags")
+    public TagSuggestions suggestTags(@QueryParam("prefix") @DefaultValue("") String prefix) {
+        return new TagSuggestions(tags.suggest(prefix, SUGGESTIONS));
     }
 
     /** Removes the uploaded thumbnail of a connection that the person edits: its card generates one again. */
@@ -687,7 +732,17 @@ public class ConnectionResource {
                 connection.getPieces(),
                 connection.hasMorePieces(),
                 connection.getSourceState(),
-                connection.getCheckedAt());
+                connection.getCheckedAt(),
+                tagsOf(connection));
+    }
+
+    /** The free tags of a connection, empty when the kernel has no entry for it. */
+    private List<String> tagsOf(Connection connection) {
+        try {
+            return tags.of(ref(connection.getId()));
+        } catch (NoSuchElementException e) {
+            return List.of();
+        }
     }
 
     /** The names of the people of the organization, each read once for an answer. */
