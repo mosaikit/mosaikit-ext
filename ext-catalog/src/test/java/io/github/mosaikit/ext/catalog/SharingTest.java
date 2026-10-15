@@ -29,8 +29,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Sharing of folders and files (EXT-003), on a tree kept in memory and a kernel that answers as the
- * kernel does (MK-055): levels only from the owner and the grants of the item itself. The catalog adds
- * the inheritance from a folder to its content, Shared with me and who has access through which share.
+ * kernel does (MK-055, MK-136): the level of a person on an item is the highest of the one from its
+ * owner and its grants and of their level on the folder above it, since folders and files inherit. The
+ * catalog asks it and adds Shared with me and who has access through which share.
  */
 @Tag("EXT-003")
 class SharingTest {
@@ -42,7 +43,7 @@ class SharingTest {
     private static final UUID TEAM = UUID.randomUUID();
 
     private final FakeItems items = new FakeItems();
-    private final FakeKernel kernel = new FakeKernel();
+    private final FakeKernel kernel = new FakeKernel(items);
 
     private Item projects;
     private Item drafts;
@@ -129,14 +130,18 @@ class SharingTest {
     }
 
     @Test
-    void onlyALevelOnTheItemItselfLetsAPersonShareItInTheDialogOfTheKernel() {
+    void theHighestLevelOnAFolderLetsAPersonShareWhatItHolds() {
         kernel.grant(projects, Subject.group(TEAM), "manage");
         Tree teammate = as(TEAMMATE);
         assertEquals("manage", teammate.level(plan));
         assertTrue(teammate.canShare(projects));
-        // The kernel does not know that the share of the folder covers the file (see the README).
-        assertFalse(teammate.canShare(plan));
+        // The kernel passes the level of the folder to the file, and lets them share it (MK-136).
+        assertTrue(teammate.canShare(plan));
         assertTrue(as(OWNER).canShare(plan));
+
+        kernel.grant(drafts, Subject.person(OUTSIDER), "edit");
+        Item notes = add(file(drafts, "notes.txt"));
+        assertFalse(as(OUTSIDER).canShare(notes));
     }
 
     @Test
@@ -247,11 +252,6 @@ class SharingTest {
         }
 
         @Override
-        public List<Item> all() {
-            return List.copyOf(all.values());
-        }
-
-        @Override
         public List<Item> files() {
             return all.values().stream().filter(item -> !item.isFolder()).toList();
         }
@@ -270,19 +270,22 @@ class SharingTest {
         public void delete(Item item) {
             all.remove(item.getId());
         }
-
-        @Override
-        public void deleteAll() {
-            all.clear();
-        }
     }
 
-    /** The kernel as MK-055 has it: the owner and the grants of the resource itself, no inheritance. */
+    /**
+     * The kernel as MK-055 and MK-136 have it: the owner and the grants of the resource, and the level on
+     * its parent folder, for types that inherit as folders and files do.
+     */
     private static final class FakeKernel implements Sharing {
+        private final Items items;
         private final Map<UUID, UUID> owners = new HashMap<>();
         private final Map<UUID, Set<UUID>> teams = new HashMap<>();
         private final List<Grant> grants = new ArrayList<>();
         private UUID viewer;
+
+        FakeKernel(Items items) {
+            this.items = items;
+        }
 
         UUID owner(Item item) {
             return owners.get(item.getId());
@@ -315,6 +318,23 @@ class SharingTest {
         }
 
         @Override
+        public List<Grant> inheritedGrants(ResourceRef resource) {
+            List<Grant> inherited = new ArrayList<>();
+            Optional<Item> above = parent(resource);
+            while (above.isPresent()) {
+                inherited.addAll(grants(Tree.ref(above.get())));
+                above = parent(Tree.ref(above.get()));
+            }
+            return inherited;
+        }
+
+        private Optional<Item> parent(ResourceRef resource) {
+            return items.findById(UUID.fromString(resource.id()))
+                    .map(Item::getParentId)
+                    .flatMap(items::findById);
+        }
+
+        @Override
         public Optional<String> level(ResourceRef resource) {
             return level(viewer, resource);
         }
@@ -325,13 +345,22 @@ class SharingTest {
                 return Optional.of(Levels.MANAGE);
             }
             Viewer viewer = new Viewer(person, teams.getOrDefault(person, Set.of()), true);
-            String level = null;
+            String level = parent(resource)
+                    .flatMap(folder -> level(person, Tree.ref(folder)))
+                    .orElse(null);
             for (Grant grant : grants(resource)) {
                 if (viewer.reaches(grant)) {
-                    level = Levels.highest(level, grant.level());
+                    level = highest(level, grant.level());
                 }
             }
             return Optional.ofNullable(level);
+        }
+
+        private static String highest(String a, String b) {
+            if (a == null) {
+                return b;
+            }
+            return b == null || Levels.ORDER.indexOf(a) >= Levels.ORDER.indexOf(b) ? a : b;
         }
 
         @Override
@@ -352,6 +381,7 @@ class SharingTest {
         @Override
         public Set<String> visible(UUID person, String extension, String type, String level) {
             return owners.keySet().stream()
+                    .filter(id -> items.findById(id).map(Item::getKind).filter(type::equals).isPresent())
                     .map(id -> new ResourceRef(extension, type, id.toString()))
                     .filter(ref -> allows(person, ref, level))
                     .map(ResourceRef::id)

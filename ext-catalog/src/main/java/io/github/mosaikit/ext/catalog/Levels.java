@@ -6,8 +6,9 @@ import java.util.List;
 
 /**
  * The levels of folders and files, from the lowest to the highest, as the manifest declares them. A
- * level on a folder also counts on what it holds, at any depth: the level of a person on an item is
- * the highest of their levels on it and on the folders above it (EXT-003).
+ * level on a folder also counts on what it holds, at any depth: the kernel answers the level of a
+ * person on an item as the highest of their levels on it and on the folders above it, since both types
+ * declare {@code inherits: parent} (EXT-003, MK-136).
  */
 public final class Levels {
 
@@ -24,17 +25,6 @@ public final class Levels {
     public static final List<String> ORDER = List.of(READ, EDIT, MANAGE);
 
     private Levels() {}
-
-    /** The higher of two levels, either of which may be {@code null} (no level). */
-    public static String highest(String a, String b) {
-        if (a == null) {
-            return b;
-        }
-        if (b == null) {
-            return a;
-        }
-        return ORDER.indexOf(a) >= ORDER.indexOf(b) ? a : b;
-    }
 
     /** Whether a level, possibly {@code null}, is at least the wanted one. */
     public static boolean atLeast(String level, String wanted) {

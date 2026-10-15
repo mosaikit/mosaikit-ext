@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MPL-2.0
 package io.github.mosaikit.ext.catalog;
 
-import dev.mosaikit.kernel.api.events.PlatformEvents;
 import dev.mosaikit.kernel.api.files.FileStorage;
 import dev.mosaikit.kernel.api.resource.ResourceRef;
 import dev.mosaikit.kernel.api.resource.Resources;
@@ -54,38 +53,26 @@ public class ItemResource {
     /** What an item holds, at any depth: the confirmation of a delete names it. */
     public record Summary(int items, long bytes) {}
 
-    /** The event that asks a job to delete the content of files the person could not delete themselves. */
-    static final String REMOVAL_REQUESTED = "removal.requested";
-
-    /** The event that asks a job to delete a content replaced by another one (EXT-105). */
-    static final String CONTENT_DISCARDED = "content.discarded";
-
     private final Items items;
-    private final PendingRemovals removals;
     private final Resources resources;
     private final Sharing sharing;
     private final FileStorage files;
-    private final PlatformEvents events;
     private final FileKinds kinds;
     private final FileKindEvents kindEvents;
     private final SecurityIdentity identity;
 
     public ItemResource(
             Items items,
-            PendingRemovals removals,
             Resources resources,
             Sharing sharing,
             FileStorage files,
-            PlatformEvents events,
             FileKinds kinds,
             FileKindEvents kindEvents,
             SecurityIdentity identity) {
         this.items = items;
-        this.removals = removals;
         this.resources = resources;
         this.sharing = sharing;
         this.files = files;
-        this.events = events;
         this.kinds = kinds;
         this.kindEvents = kindEvents;
         this.identity = identity;
@@ -170,11 +157,11 @@ public class ItemResource {
     }
 
     /**
-     * Deletes an item and, for a folder, everything it holds: from the catalog at once, and their
-     * content from the file service of the kernel (EXT-004). The kernel lets a person delete the
-     * content of a file they own or edit themselves; the content of a file they reach only through a
-     * folder above it is deleted by a job of the organization a few seconds later, and its resource
-     * stays registered until then, so that the content is never a file of the whole organization.
+     * Deletes an item and, for a folder, everything it holds: from the catalog and, in the same
+     * transaction, their content from the file service of the kernel (EXT-004), as the person, who
+     * edits each file also through a folder above it (MK-136). The content of a file goes before its
+     * resource, and what a folder holds before the folder, so that a content is never left without the
+     * resource whose sharing protects it; a delete the kernel refuses deletes nothing.
      */
     @DELETE
     @Path("{id}")
@@ -186,21 +173,14 @@ public class ItemResource {
         // What a folder holds goes before it: the parent of each item is still there when it goes.
         gone = new ArrayList<>(gone.reversed());
         gone.add(item);
-        boolean pending = false;
         // The kinds are told before the folders above their files go, while their path is still known.
         kindEvents.raiseForFiles(gone, Change.DELETED, Map.of());
         for (Item each : gone) {
-            ResourceRef ref = Tree.ref(each);
-            if (each.isFolder() || deleteContent(each, ref)) {
-                resources.remove(ref);
-            } else {
-                removals.insert(new PendingRemoval(each));
-                pending = true;
+            if (!each.isFolder()) {
+                deleteContent(each.getFileId(), each.getName());
             }
+            resources.remove(Tree.ref(each));
             items.delete(each);
-        }
-        if (pending) {
-            events.raise(CatalogResource.EXTENSION, REMOVAL_REQUESTED, Map.of("item", item.getId().toString()));
         }
         return Response.noContent().build();
     }
@@ -209,9 +189,8 @@ public class ItemResource {
      * Replaces the content of a file with the body, with its {@code Content-Type}, keeping the file, its
      * name, its folder and its shares (EXT-105). The kinds of files look at it again: the kind of the file
      * is told that it was replaced, or, when another kind (or none) recognizes it now, that it is no
-     * longer of its kind, and the new kind that it was stored. The kernel lets a person store a content of
-     * a file with a level of their own on it (MK-055): one who edits it only through a folder above it is
-     * refused with 403.
+     * longer of its kind, and the new kind that it was stored. The person edits the file also through a
+     * folder above it (MK-136): the kernel stores the new content and deletes the old one as them.
      */
     @PUT
     @Path("{id}/content")
@@ -235,8 +214,7 @@ public class ItemResource {
         } catch (IllegalArgumentException e) {
             throw CatalogResource.problem(Response.Status.BAD_REQUEST, e.getMessage());
         } catch (SecurityException e) {
-            throw CatalogResource.problem(
-                    Response.Status.FORBIDDEN, "Only who holds a level on the file itself replaces its content.");
+            throw CatalogResource.problem(Response.Status.FORBIDDEN, "You cannot replace the content of this file.");
         } catch (IllegalStateException e) {
             throw CatalogResource.problem(Response.Status.FORBIDDEN, e.getMessage());
         }
@@ -254,29 +232,21 @@ public class ItemResource {
         if (kind != null) {
             kindEvents.raise(item, kind.equals(previousKind) ? Change.REPLACED : Change.STORED, Map.of());
         }
-        discard(previousContent);
+        deleteContent(previousContent, item.getName());
         return Response.noContent().build();
     }
 
-    /** Deletes a content that a file no longer has: as the person, or else in a job of the organization. */
-    private void discard(UUID content) {
+    /**
+     * Deletes a content of a file as the person, in the transaction of the request; one already gone is
+     * not an error, and one the kernel does not let them delete undoes the request.
+     */
+    private void deleteContent(UUID content, String name) {
         try {
             files.delete(CatalogResource.EXTENSION, content);
-        } catch (NoSuchElementException | SecurityException e) {
-            events.raise(CatalogResource.EXTENSION, CONTENT_DISCARDED, Map.of("file", content.toString()));
-        }
-    }
-
-    /** Deletes the content of a file as the person, when the kernel lets them; whether it did. */
-    private boolean deleteContent(Item file, ResourceRef ref) {
-        if (!Levels.atLeast(sharing.level(ref).orElse(null), Levels.EDIT)) {
-            return false;
-        }
-        try {
-            files.delete(CatalogResource.EXTENSION, file.getFileId());
-            return true;
-        } catch (NoSuchElementException | SecurityException e) {
-            return false;
+        } catch (NoSuchElementException e) {
+            // Already gone.
+        } catch (SecurityException e) {
+            throw CatalogResource.problem(Response.Status.FORBIDDEN, "You cannot delete the content of " + name + ".");
         }
     }
 

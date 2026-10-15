@@ -22,7 +22,8 @@ database:
   schema: ext_catalog
 # Folders and files are resources of the kernel (MK-054): sharing, search and audit apply to them as
 # to any other resource. The levels are those of the sharing of the catalog (EXT-003); a level on a
-# folder also counts on what it holds.
+# folder also counts on what it holds, at any depth: both types inherit the levels of their parent
+# folder (MK-136), and the kernel answers them in every check, list, signed link and delete.
 resources:
   - type: folder
     title: Folder
@@ -32,6 +33,7 @@ resources:
       - { name: edit, title: Edit, edits: true, i18n: { it: { title: Modifica } } }
       - { name: manage, title: Manage, edits: true, i18n: { it: { title: Gestione } } }
     subjects: [person, group, organization, link]
+    inherits: parent
   - type: file
     title: File
     i18n: { it: { title: File } }
@@ -40,6 +42,7 @@ resources:
       - { name: edit, title: Edit, edits: true, i18n: { it: { title: Modifica } } }
       - { name: manage, title: Manage, edits: true, i18n: { it: { title: Gestione } } }
     subjects: [person, group, organization, link]
+    inherits: parent
 frontend:
   entry: web/index.js
   isolation: module

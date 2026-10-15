@@ -204,6 +204,29 @@ test('EXT-105 the kind is told when its file is stored, replaced, renamed, moved
   expect(await told(plain.id)).toEqual([]);
 });
 
+test('EXT-105 a person who edits a file through its folder replaces its content, and its kind reads it in their request', async () => {
+  const top = await folder(member(), unique('Through'));
+  const note = await fileOfType(member(), top.id, 'shared.note', 'one two', 'text/plain');
+  await stateOf(top.id, 'shared.note', 'counted');
+  const before = (await download(member(), [note.id])).download.entries[0]!.url!;
+  await share(member(), top, { kind: 'person', email: member(1).user }, 'edit');
+
+  // The level on the folder reaches the file in the kernel (MK-136): the colleague replaces it, and the
+  // content it had leaves the storage in the same request.
+  const replaced = await api(member(1), `${API}/items/${note.id}/content`, {
+    method: 'PUT',
+    headers: { 'content-type': 'text/plain' },
+    body: 'three four five',
+  });
+  expect(replaced.status, JSON.stringify(replaced.body)).toBe(204);
+  expect((await fetchLink(before)).status).toBe(404);
+
+  // The extension of the kind opens the file in a request of the colleague, who reads it through the folder.
+  const counted = await api(member(1), `${NOTES_API}/notes/${note.id}/count`, { method: 'POST' });
+  expect(counted.status, JSON.stringify(counted.body)).toBe(200);
+  expect(counted.body).toEqual(expect.objectContaining({ words: 3 }));
+});
+
 test.describe('in Italian', () => {
   test.use({ locale: 'it-IT' });
 

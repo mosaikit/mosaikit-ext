@@ -4,7 +4,6 @@ package io.github.mosaikit.ext.catalog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.mosaikit.kernel.api.extension.SubjectKind;
@@ -33,11 +32,7 @@ class SharingStateTest {
     }
 
     @Test
-    void theLevelOnAnItemIsTheHighestOfItsOwnAndTheOneAbove() {
-        assertEquals("edit", Levels.highest("read", "edit"));
-        assertEquals("manage", Levels.highest("manage", "read"));
-        assertEquals("read", Levels.highest(null, "read"));
-        assertNull(Levels.highest(null, null));
+    void eachLevelIncludesThoseBeforeIt() {
         assertTrue(Levels.atLeast("manage", "edit"));
         assertFalse(Levels.atLeast("read", "edit"));
         assertFalse(Levels.atLeast(null, "read"));

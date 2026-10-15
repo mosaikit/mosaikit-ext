@@ -45,8 +45,6 @@ const ROOT = 'root';
 const SHARED = 'shared';
 /** The type of the items dragged inside the app. */
 const DRAGGED = 'application/x-mosaikit-catalog-items';
-/** How long the app waits for the links of a download, in milliseconds. */
-const DOWNLOAD_WAIT = 60_000;
 
 const ICONS = {
   folder:
@@ -755,18 +753,9 @@ const extension = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items: [item.id] }),
         });
-        let download = await response.json().catch(() => ({}));
+        const download = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(this.reason(download, response.status));
-        }
-        const until = Date.now() + DOWNLOAD_WAIT;
-        while (download.status === 'pending' && Date.now() < until) {
-          await new Promise((resolve) => setTimeout(resolve, 400));
-          const again = await context.fetch(`${DOWNLOADS_API}/${encodeURIComponent(download.id)}`);
-          download = await again.json().catch(() => ({ status: 'failed' }));
-        }
-        if (download.status !== 'ready') {
-          throw new Error(this.t('notReady'));
         }
         return download.entries[0].url;
       }
@@ -1289,22 +1278,12 @@ const extension = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        let download = await response.json().catch(() => ({}));
+        const download = await response.json().catch(() => ({}));
         if (!response.ok) {
           this.say(t('notDownloaded', { reason: this.reason(download, response.status) }), true);
           return;
         }
         this.say(t('preparing', { name: download.name }));
-        const until = Date.now() + DOWNLOAD_WAIT;
-        while (download.status === 'pending' && Date.now() < until) {
-          await new Promise((resolve) => setTimeout(resolve, 400));
-          const again = await context.fetch(`${DOWNLOADS_API}/${encodeURIComponent(download.id)}`);
-          download = await again.json().catch(() => ({ status: 'failed' }));
-        }
-        if (download.status !== 'ready') {
-          this.say(t('notDownloaded', { reason: t('notReady') }), true);
-          return;
-        }
         try {
           let blob;
           if (download.kind === 'file') {

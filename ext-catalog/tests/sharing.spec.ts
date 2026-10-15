@@ -208,9 +208,14 @@ test('EXT-003 the sharing dialog is the one of the platform, with read, edit and
     ['person', 'manage', 'owner', top.name],
     ['group', 'edit', 'grant', top.name],
   ]);
-  // The colleague manages Acme through their own share, so the platform lets them share it; a folder
-  // they reach only through the group above, they cannot share in the dialog of the platform.
+  // The colleague manages Acme through their own share, so the platform lets them share it, and what
+  // it holds too, since the level of a folder reaches its content (MK-136); a folder they reach only
+  // through the group above, which edits, they cannot share.
   expect(((await api(member(1), `${API}/items/${acme.id}/access`)).body as Access).canShare).toBe(true);
+  const inAcme = await folder(member(), 'Offers', acme.id);
+  const viaAcme = (await api(member(1), `${API}/items/${inAcme.id}/access`)).body as Access;
+  expect(viaAcme.level).toBe('manage');
+  expect(viaAcme.canShare).toBe(true);
   const deeper = await folder(member(), 'Contracts', top.id);
   const viaGroup = (await api(member(1), `${API}/items/${deeper.id}/access`)).body as Access;
   expect(viaGroup.level).toBe('edit');
