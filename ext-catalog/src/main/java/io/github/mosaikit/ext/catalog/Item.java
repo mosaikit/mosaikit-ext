@@ -95,6 +95,17 @@ public class Item {
         return item;
     }
 
+    /** Gives the item another name (EXT-002); it changes now. */
+    public void rename(String newName, Instant now) {
+        this.name = ItemName.check(newName);
+        this.changedAt = Objects.requireNonNull(now, "now").truncatedTo(ChronoUnit.MICROS);
+    }
+
+    /** Puts the item in another folder, or at the root ({@code null}), keeping its identity (EXT-002). */
+    public void moveTo(UUID newParentId) {
+        this.parentId = newParentId;
+    }
+
     public UUID getId() {
         return id;
     }

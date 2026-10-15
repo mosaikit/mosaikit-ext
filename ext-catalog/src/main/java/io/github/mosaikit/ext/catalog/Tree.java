@@ -5,8 +5,10 @@ package io.github.mosaikit.ext.catalog;
 import dev.mosaikit.kernel.api.resource.ResourceRef;
 import dev.mosaikit.kernel.api.sharing.Grant;
 import dev.mosaikit.kernel.api.sharing.Sharing;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -169,6 +171,47 @@ final class Tree {
             loaded.put(item.getId(), Optional.of(item));
         }
         return found;
+    }
+
+    /** An item the person reads; empty when it does not exist or they cannot read it. */
+    Optional<Item> readable(UUID id) {
+        return item(id).filter(item -> level(item) != null);
+    }
+
+    /**
+     * Everything a folder holds, at any depth, each folder before what it holds; empty for a file
+     * (EXT-002). The person reads all of it, since a level on a folder counts on its content.
+     */
+    List<Item> contents(Item item) {
+        List<Item> found = new ArrayList<>();
+        if (!item.isFolder()) {
+            return found;
+        }
+        Deque<Item> todo = new ArrayDeque<>();
+        todo.add(item);
+        while (!todo.isEmpty()) {
+            Item folder = todo.poll();
+            for (Item child : items.children(folder.getId())) {
+                loaded.put(child.getId(), Optional.of(child));
+                found.add(child);
+                if (child.isFolder()) {
+                    todo.add(child);
+                }
+            }
+        }
+        return found;
+    }
+
+    /** Whether a folder is the item itself or is inside it, at any depth. */
+    boolean within(Item folder, Item item) {
+        Item step = folder;
+        while (step != null) {
+            if (step.getId().equals(item.getId())) {
+                return true;
+            }
+            step = step.getParentId() == null ? null : item(step.getParentId()).orElse(null);
+        }
+        return false;
     }
 
     /** The sharing state of an item, from its own grants and those of the folders above it. */

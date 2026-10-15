@@ -1,25 +1,39 @@
 // SPDX-FileCopyrightText: 2026 Massimo Antonini
 // SPDX-License-Identifier: MPL-2.0
 import { translator } from './i18n.js';
+import { chosen, dropped } from './drop.js';
+import { zip } from './zip.js';
 
 /**
- * Frontend of the catalog (EXT-001): a custom element that the shell renders for /app/catalog. The
+ * Frontend of the catalog (EXT-001, EXT-002, EXT-003): a custom element that the shell renders for /app/catalog. The
  * tree of folders is on the left, the content of the open folder in the middle, its path above as
  * breadcrumbs. The open folder is in the address (/app/catalog?folder=<id>), so it can be linked and
  * the back button of the browser works; Shared with me is at /app/catalog?view=shared (EXT-003). Below
  * the content, who has access to the open folder or to the item chosen in the list, and through which
  * share; sharing itself happens in the sharing dialog of the platform (MK-055). Styled with the --mk-*
  * tokens of the theme, in the language of the person.
+ *
+ * Files and folders are uploaded by dropping them from the computer onto a folder of the list or of the
+ * tree, or onto the open folder, or with the Upload buttons; moved by dragging them onto a folder or
+ * with Move; renamed, deleted and downloaded with the buttons above the list (EXT-002). The same works
+ * by keyboard, on a row of the list or a folder of the tree: F2 renames, Delete deletes, Ctrl+X then
+ * Ctrl+V moves into the folder that has the focus, or into the open folder.
  */
 
 const ELEMENT = 'mosaikit-ext-catalog';
 const API = '/api/v1/ext/catalog/folders';
 const SHARED_API = '/api/v1/ext/catalog/shared';
 const ITEMS_API = '/api/v1/ext/catalog/items';
+const UPLOADS_API = '/api/v1/ext/catalog/uploads';
+const DOWNLOADS_API = '/api/v1/ext/catalog/downloads';
 const ROUTE = '/app/catalog';
 const ROOT = 'root';
 /** The view Shared with me, where a folder id would be: never the id of a folder. */
 const SHARED = 'shared';
+/** The type of the items dragged inside the app. */
+const DRAGGED = 'application/x-mosaikit-catalog-items';
+/** How long the app waits for the links of a download, in milliseconds. */
+const DOWNLOAD_WAIT = 60_000;
 
 const ICONS = {
   folder:
@@ -42,10 +56,19 @@ const STYLE = `
   [aria-current='page'] { color: var(--mk-fg); font-weight: 600; }
   button { font: inherit; padding: 6px 12px; border-radius: var(--mk-radius); border: 1px solid var(--mk-line);
            background: var(--mk-surface); color: var(--mk-fg); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.danger { border-color: var(--mk-danger); color: var(--mk-danger); }
+  button.link { border: 0; background: none; padding: 0; color: var(--mk-accent); text-align: left; }
+  button.link:hover { text-decoration: underline; }
   button.primary { border-color: var(--mk-accent); background: var(--mk-accent); color: var(--mk-accent-fg); font-weight: 600; }
   form.create { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
   form.create input { font: inherit; padding: 6px 10px; border: 1px solid var(--mk-line); border-radius: var(--mk-radius);
                       background: var(--mk-bg); color: var(--mk-fg); min-width: 240px; }
+  input[type=text] { font: inherit; padding: 6px 10px; border: 1px solid var(--mk-line); border-radius: var(--mk-radius);
+                    background: var(--mk-bg); color: var(--mk-fg); min-width: 240px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+  .toolbar label { display: inline-flex; gap: 6px; align-items: center; margin-right: 8px; }
+  .shortcuts { margin: 0 0 8px; }
   .layout { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; gap: 16px; align-items: start; }
   @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
   .panel { background: var(--mk-surface); border: 1px solid var(--mk-line); border-radius: var(--mk-radius); padding: 12px; min-width: 0; }
@@ -70,8 +93,24 @@ const STYLE = `
   section.access li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 0; border-bottom: 1px solid var(--mk-line); }
   section.access li .who { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
   section.access li .via { color: var(--mk-muted); }
+  tr.selected td { background: color-mix(in srgb, var(--mk-accent) 10%, transparent); }
+  tr.cut td { opacity: .6; }
+  .drop { outline: 2px dashed var(--mk-accent); outline-offset: -2px; }
   [role='status'] { min-height: 1.2em; margin: 0 0 8px; color: var(--mk-muted); }
   [role='status'].error { color: var(--mk-danger); }
+  .uploads { margin-top: 16px; }
+  .uploads ul { list-style: none; margin: 0; padding: 0; }
+  .uploads li { display: grid; grid-template-columns: minmax(0, 1fr) 140px minmax(90px, auto); gap: 8px; align-items: center; padding: 4px 0; }
+  .uploads .path { overflow-wrap: anywhere; }
+  .uploads .failed { color: var(--mk-danger); }
+  dialog { border: 1px solid var(--mk-line); border-radius: var(--mk-radius); background: var(--mk-surface); color: var(--mk-fg);
+           padding: 16px; min-width: min(420px, 90vw); }
+  dialog::backdrop { background: rgb(0 0 0 / 40%); }
+  dialog h2 { font-size: 17px; }
+  dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  dialog [role='alert'] { color: var(--mk-danger); min-height: 1.2em; margin: 8px 0 0; }
+  dialog ul.folders { list-style: none; margin: 8px 0; padding: 0; max-height: 280px; overflow-y: auto; }
+  dialog ul.folders li { padding: 2px 0; }
   [hidden] { display: none !important; }
 `;
 
@@ -99,6 +138,10 @@ const extension = {
         this.tree = new Map();
         this.expanded = new Set();
         this.current = null;
+        /** The items of the open folder that are selected, by id. */
+        this.selected = new Set();
+        /** The items cut with Ctrl+X, to move with Ctrl+V: [{ id, name, kind }]. */
+        this.cut = [];
         this.render();
         window.addEventListener('popstate', this.onPopState);
         void this.open(folderInAddress(), { push: false });
@@ -126,6 +169,18 @@ const extension = {
             <button type="submit" class="primary"></button>
             <button type="button" class="cancel"></button>
           </form>
+          <div class="toolbar" hidden>
+            <label><input type="checkbox" class="all" /> <span></span></label>
+            <button type="button" class="upload-files"></button>
+            <button type="button" class="upload-folder"></button>
+            <button type="button" class="download"></button>
+            <button type="button" class="move"></button>
+            <button type="button" class="rename"></button>
+            <button type="button" class="delete danger"></button>
+            <input type="file" class="files" multiple hidden />
+            <input type="file" class="folder" webkitdirectory hidden />
+          </div>
+          <p class="muted shortcuts" hidden></p>
           <p role="status" aria-live="polite"></p>
           <div class="layout">
             <nav class="tree panel"><ul></ul></nav>
@@ -154,8 +209,13 @@ const extension = {
                 <p class="muted admins"></p>
                 <button type="button" class="share"></button>
               </section>
+              <section class="uploads" hidden>
+                <h2></h2>
+                <ul></ul>
+              </section>
             </section>
           </div>
+          <dialog aria-labelledby="dialog-title"><form method="dialog"></form></dialog>
           <p class="version"></p>`;
         const $ = (selector) => root.querySelector(selector);
         this.$ = $;
@@ -169,6 +229,16 @@ const extension = {
         $('form.create input').placeholder = t('folderName');
         $('form.create button[type=submit]').textContent = t('create');
         $('form.create button.cancel').textContent = t('cancel');
+        $('.toolbar').setAttribute('aria-label', t('actions'));
+        $('.toolbar').setAttribute('role', 'toolbar');
+        $('.toolbar label span').textContent = t('selectAll');
+        $('button.upload-files').textContent = t('uploadFiles');
+        $('button.upload-folder').textContent = t('uploadFolder');
+        $('button.download').textContent = t('download');
+        $('button.move').textContent = t('move');
+        $('button.rename').textContent = t('rename');
+        $('button.delete').textContent = t('delete');
+        $('.shortcuts').textContent = t('shortcuts');
         $('th[data-sort=name] button').textContent = t('name');
         $('th.size').textContent = t('size');
         $('th.owner').textContent = t('owner');
@@ -183,6 +253,8 @@ const extension = {
         $('section.access .admins').textContent = t('admins');
         $('section.access button.share').textContent = t('share');
         $('section.access button.share').addEventListener('click', () => this.share());
+        $('.uploads').setAttribute('aria-label', t('uploads'));
+        $('.uploads h2').textContent = t('uploads');
         // The sharing dialog of the shell gives the focus back to the Share button when it closes: then
         // the list and who has access show what changed in it.
         root.addEventListener('focusin', () => {
@@ -217,6 +289,54 @@ const extension = {
             void this.open(this.current?.id ?? null, { push: false });
           });
         }
+
+        // EXT-002: the actions on the selection, and uploads with the dialogs of the browser.
+        $('input.all').addEventListener('change', (event) => {
+          const items = this.current?.items ?? [];
+          this.selected = new Set(event.target.checked ? items.map((item) => item.id) : []);
+          this.showSelection();
+        });
+        $('button.upload-files').addEventListener('click', () => $('input.files').click());
+        $('button.upload-folder').addEventListener('click', () => $('input.folder').click());
+        for (const input of [$('input.files'), $('input.folder')]) {
+          input.addEventListener('change', () => {
+            const entries = chosen(input.files ?? []);
+            input.value = '';
+            const target = openFolderId(this.current);
+            if (target) {
+              void this.upload(target, entries);
+            }
+          });
+        }
+        $('button.download').addEventListener('click', () => void this.download(this.selection()));
+        $('button.move').addEventListener('click', () => void this.askMove(this.selection()));
+        $('button.rename').addEventListener('click', () => {
+          const [item] = this.selection();
+          if (item) {
+            void this.askRename(item);
+          }
+        });
+        $('button.delete').addEventListener('click', () => void this.askDelete(this.selection()));
+
+        // Dropped from the computer onto the open folder, or items dragged onto it.
+        // Shared with me is no folder: nothing is dropped there.
+        this.dropTarget($('section.content'), () => (this.current?.id === SHARED ? undefined : (this.current?.id ?? null)));
+        $('tbody').addEventListener('keydown', (event) => {
+          const row = event.target.closest?.('tr');
+          const item = row && this.current?.items.find((each) => each.id === row.dataset.id);
+          if (item) {
+            this.onKey(event, item);
+          }
+        });
+        $('nav.tree').addEventListener('keydown', (event) => {
+          const link = event.target.closest?.('a[data-id]');
+          if (link) {
+            this.onKey(event, { id: link.dataset.id, name: link.dataset.name, kind: 'folder' });
+          } else if (event.target.closest?.('a')) {
+            // The root of the tree: only paste.
+            this.onKey(event, null);
+          }
+        });
       }
 
       /** Opens a folder, the root when id is null, or Shared with me, and shows it in the address. */
@@ -239,6 +359,9 @@ const extension = {
           return;
         }
         const folder = await response.json();
+        if ((this.current?.id ?? null) !== (id ?? null)) {
+          this.selected = new Set();
+        }
         if (id === SHARED) {
           folder.id = SHARED;
           folder.name = this.t('sharedWithMe');
@@ -263,8 +386,10 @@ const extension = {
         }
       }
 
-      /** Loads the open view again, and who has access to the item shown, after a change of sharing. */
+      /** Loads the open view again, the tree, and who has access to the item shown, after a change. */
       async refresh() {
+        // Items may have moved, been renamed or deleted (EXT-002): read the tree again too.
+        this.tree.clear();
         const shown = this.access?.id;
         await this.open(this.current?.id ?? null, { push: false });
         if (shown && shown !== this.access?.id) {
@@ -374,6 +499,12 @@ const extension = {
         if (!folder.canCreate) {
           $('form.create').hidden = true;
         }
+        $('.toolbar').hidden = false;
+        $('.shortcuts').hidden = false;
+        // Files go in a folder: no upload at the root nor in Shared with me.
+        const noUpload = !openFolderId(folder) || !folder.canCreate;
+        $('button.upload-files').hidden = noUpload;
+        $('button.upload-folder').hidden = noUpload;
         this.renderCrumbs(folder.path);
         $('table').setAttribute('aria-label', t('content', { name: folder.name ?? t('root') }));
         for (const header of this.shadowRoot.querySelectorAll('th[data-sort]')) {
@@ -382,24 +513,56 @@ const extension = {
             header.dataset.sort === this.sort ? (this.order === 'asc' ? 'ascending' : 'descending') : 'none',
           );
         }
+        const ids = new Set(folder.items.map((item) => item.id));
+        this.selected = new Set([...this.selected].filter((id) => ids.has(id)));
         $('tbody').replaceChildren(...folder.items.map((item) => this.row(item)));
         $('.empty').hidden = folder.items.length > 0;
         $('.empty').textContent = folder.id === SHARED ? t('emptyShared') : folder.id ? t('empty') : t('emptyRoot');
+        this.showSelection();
       }
 
       row(item) {
         const t = this.t;
         const tr = document.createElement('tr');
         tr.dataset.kind = item.kind;
+        tr.dataset.id = item.id;
         const name = document.createElement('td');
         name.className = 'name';
-        name.insertAdjacentHTML('afterbegin', ICONS[item.kind] ?? ICONS.file);
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.className = 'select';
+        box.setAttribute('aria-label', t('select', { name: item.name }));
+        box.checked = this.selected.has(item.id);
+        box.addEventListener('change', () => {
+          if (box.checked) {
+            this.selected.add(item.id);
+          } else {
+            this.selected.delete(item.id);
+          }
+          this.showSelection();
+        });
+        name.append(box);
+        name.insertAdjacentHTML('beforeend', ICONS[item.kind] ?? ICONS.file);
         if (item.kind === 'folder') {
           name.append(this.link(item.id, item.name));
+          this.dropTarget(tr, () => item.id);
         } else {
-          const span = document.createElement('span');
-          span.textContent = item.name;
-          name.append(span);
+          // A file downloads with its name (EXT-002).
+          const open = document.createElement('button');
+          open.type = 'button';
+          open.className = 'link';
+          open.textContent = item.name;
+          open.title = t('downloadItem', { name: item.name });
+          open.addEventListener('click', () => void this.download([item]));
+          name.append(open);
+        }
+        if (editable(item)) {
+          tr.draggable = true;
+          tr.addEventListener('dragstart', (event) => {
+            const dragged = this.selected.has(item.id) ? this.selection() : [item];
+            event.dataTransfer.setData(DRAGGED, JSON.stringify(dragged.map(({ id, name, kind }) => ({ id, name, kind }))));
+            event.dataTransfer.effectAllowed = 'move';
+          });
         }
         const size = cell(item.kind === 'folder' ? this.count(item.items) : this.bytes(item.size), 'num');
         const owner = cell(item.owner ? (item.owner.name ?? '') : t('theOrganization'));
@@ -419,8 +582,37 @@ const extension = {
         who.addEventListener('click', () => void this.showAccess(item.id));
         sharing.append(who);
         tr.append(name, size, owner, changed, sharing);
+        tr.classList.toggle('selected', this.selected.has(item.id));
+        tr.classList.toggle('cut', this.cut.some((each) => each.id === item.id));
         return tr;
       }
+
+      /** The items selected in the open folder, in its order. */
+      selection() {
+        return (this.current?.items ?? []).filter((item) => this.selected.has(item.id));
+      }
+
+      /** Shows the selection on the rows and enables the actions it allows. */
+      showSelection() {
+        const $ = this.$;
+        const selection = this.selection();
+        for (const tr of this.shadowRoot.querySelectorAll('tbody tr')) {
+          const on = this.selected.has(tr.dataset.id);
+          tr.classList.toggle('selected', on);
+          tr.querySelector('input.select').checked = on;
+        }
+        const all = $('input.all');
+        const total = this.current?.items.length ?? 0;
+        all.checked = total > 0 && selection.length === total;
+        all.indeterminate = selection.length > 0 && selection.length < total;
+        all.disabled = total === 0;
+        const changes = selection.length > 0 && selection.every(editable);
+        $('button.download').disabled = selection.length === 0;
+        $('button.move').disabled = !changes;
+        $('button.rename').disabled = !(changes && selection.length === 1);
+        $('button.delete').disabled = !changes;
+      }
+
 
       count(items) {
         if (items === 0) {
@@ -463,6 +655,8 @@ const extension = {
         $('.empty').hidden = true;
         $('button.new').hidden = true;
         $('form.create').hidden = true;
+        $('.toolbar').hidden = true;
+        $('.shortcuts').hidden = true;
         $('.not-found').hidden = false;
         this.hideAccess();
         this.renderCrumbs([]);
@@ -538,8 +732,21 @@ const extension = {
         }
         const a = this.link(folder.id, folder.name);
         a.insertAdjacentHTML('afterbegin', ICONS.folder);
+        if (folder.id && folder.id !== SHARED) {
+          a.dataset.id = folder.id;
+          a.dataset.name = folder.name;
+          // Folders of the tree move like the rows of the list (EXT-002).
+          a.draggable = true;
+          a.addEventListener('dragstart', (event) => {
+            event.dataTransfer.setData(DRAGGED, JSON.stringify([{ id: folder.id, name: folder.name, kind: 'folder' }]));
+            event.dataTransfer.effectAllowed = 'move';
+          });
+        }
         if ((this.current?.id ?? null) === folder.id && this.current) {
           a.setAttribute('aria-current', 'page');
+        }
+        if (folder.id !== SHARED) {
+          this.dropTarget(row, () => folder.id);
         }
         row.append(a);
         return row;
@@ -554,16 +761,543 @@ const extension = {
         });
         if (!response.ok) {
           const problem = await response.json().catch(() => ({}));
-          this.say(this.t('notCreated', { reason: problem.detail ?? response.status }), true);
+          this.say(this.t('notCreated', { reason: this.reason(problem, response.status) }), true);
           return;
         }
         const created = await response.json();
         const form = this.$('form.create');
         form.reset();
         form.hidden = true;
-        await this.open(parent, { push: false });
+        await this.refresh();
         this.say(this.t('created', { name: created.name }));
       }
+
+      /**
+       * Makes an element take what is dropped on it: files and folders from the computer are uploaded
+       * into its folder, items of the app are moved there (EXT-002).
+       *
+       * @param folderOf the folder of the element, null for the root, undefined for none
+       */
+      dropTarget(element, folderOf) {
+        const accepts = (event) => {
+          const types = [...(event.dataTransfer?.types ?? [])];
+          return types.includes(DRAGGED) || types.includes('Files');
+        };
+        element.addEventListener('dragover', (event) => {
+          if (!accepts(event)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = [...event.dataTransfer.types].includes(DRAGGED) ? 'move' : 'copy';
+          element.classList.add('drop');
+        });
+        element.addEventListener('dragleave', () => element.classList.remove('drop'));
+        element.addEventListener('drop', (event) => {
+          element.classList.remove('drop');
+          if (!accepts(event)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          const target = folderOf();
+          if (target === undefined) {
+            return;
+          }
+          const items = event.dataTransfer.getData(DRAGGED);
+          if (items) {
+            void this.move(JSON.parse(items), target);
+            return;
+          }
+          // Read the items of the drop now: the browser forgets them when the event ends.
+          const entries = dropped(event.dataTransfer);
+          if (!target) {
+            this.say(this.t('uploadInFolder'), true);
+            return;
+          }
+          void entries.then((list) => this.upload(target, list));
+        });
+      }
+
+      /** The keys of a row of the list or a folder of the tree; item null for the root of the tree. */
+      onKey(event, item) {
+        const command = event.ctrlKey || event.metaKey;
+        if (command && event.key.toLowerCase() === 'x' && item && editable(item)) {
+          event.preventDefault();
+          this.cut = this.selected.has(item.id) ? this.selection() : [item];
+          for (const tr of this.shadowRoot.querySelectorAll('tbody tr')) {
+            tr.classList.toggle('cut', this.cut.some((each) => each.id === tr.dataset.id));
+          }
+          this.say(this.t(this.cut.length === 1 ? 'cutDone_one' : 'cutDone', { count: this.cut.length }));
+        } else if (command && event.key.toLowerCase() === 'v' && this.cut.length > 0) {
+          event.preventDefault();
+          const into = item?.kind === 'folder' ? item.id : item ? (this.current?.id ?? null) : null;
+          if (into === SHARED) {
+            return;
+          }
+          const moving = this.cut;
+          this.cut = [];
+          void this.move(moving, into);
+        } else if (event.key === 'F2' && item && editable(item)) {
+          event.preventDefault();
+          void this.askRename(item);
+        } else if (event.key === 'Delete' && item && editable(item)) {
+          event.preventDefault();
+          void this.askDelete(this.selected.has(item.id) ? this.selection() : [item]);
+        }
+      }
+
+      /**
+       * Uploads files and folders into a folder, keeping their structure (EXT-002): the size of all of
+       * it is checked against the quota of the organization first, and nothing starts when it does not
+       * fit. Each file shows its progress.
+       *
+       * @param entries [{ path, file }], a folder with a path ending with "/" and no file
+       */
+      async upload(target, entries) {
+        const t = this.t;
+        const files = entries.filter((entry) => entry.file);
+        if (entries.length === 0) {
+          return;
+        }
+        const bytes = files.reduce((total, entry) => total + entry.file.size, 0);
+        const check = await context.fetch(`${UPLOADS_API}/check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folder: target, bytes }),
+        });
+        if (!check.ok) {
+          const problem = await check.json().catch(() => ({}));
+          if (check.status === 403 && problem.quota) {
+            const { limit, used } = problem.quota;
+            this.say(
+              t('overQuota', { size: this.bytes(bytes), limit: this.bytes(limit), free: this.bytes(Math.max(0, limit - used)) }),
+              true,
+            );
+          } else {
+            this.say(t('notUploaded', { reason: this.reason(problem, check.status) }), true);
+          }
+          return;
+        }
+
+        const panel = this.$('.uploads');
+        panel.hidden = false;
+        const rows = new Map(files.map((entry) => [entry, this.uploadRow(entry.path)]));
+        panel.querySelector('ul').replaceChildren(...[...rows.values()].map((row) => row.li));
+        const folders = new Map([['', target]]);
+        let done = 0;
+        let failed = 0;
+        this.say(t('uploading', { count: files.length }));
+        for (const entry of entries) {
+          const parts = entry.path.replace(/\/$/, '').split('/');
+          const name = parts.pop();
+          const row = rows.get(entry);
+          let parent;
+          try {
+            parent = await this.folderFor(folders, parts);
+            if (!entry.file) {
+              await this.folderFor(folders, [...parts, name]);
+              continue;
+            }
+          } catch (problem) {
+            if (row) {
+              row.failed(this.reason(problem, problem.status));
+              failed += 1;
+            }
+            continue;
+          }
+          row.start();
+          const response = await context.fetch(`${API}/${encodeURIComponent(parent)}/files?name=${encodeURIComponent(name)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': entry.file.type || 'application/octet-stream' },
+            body: entry.file,
+          });
+          if (response.ok) {
+            row.done();
+            done += 1;
+          } else {
+            row.failed(this.reason(await response.json().catch(() => ({})), response.status));
+            failed += 1;
+          }
+        }
+        await this.refresh();
+        this.say(
+          failed ? t('uploadedSome', { done, failed }) : t(done === 1 ? 'uploaded_one' : 'uploaded', { count: done }),
+          failed > 0,
+        );
+      }
+
+      /** The row of a file in the panel of uploads, with its progress. */
+      uploadRow(path) {
+        const t = this.t;
+        const li = document.createElement('li');
+        const name = document.createElement('span');
+        name.className = 'path';
+        name.textContent = path;
+        const progress = document.createElement('progress');
+        progress.max = 100;
+        progress.value = 0;
+        progress.setAttribute('aria-label', t('progressOf', { path }));
+        const state = document.createElement('span');
+        state.className = 'state';
+        state.textContent = t('waiting');
+        li.append(name, progress, state);
+        return {
+          li,
+          start() {
+            // The browser does not tell how much of a request it sent: the bar runs until the answer.
+            progress.removeAttribute('value');
+            state.textContent = t('uploadingOne');
+          },
+          done() {
+            progress.value = 100;
+            state.textContent = t('uploadedOne');
+          },
+          failed(reason) {
+            progress.value = 0;
+            state.textContent = t('failedOne', { reason });
+            state.classList.add('failed');
+          },
+        };
+      }
+
+      /**
+       * The folder of a path below the target of an upload, created when missing; a folder of that name
+       * already there is used as it is.
+       */
+      async folderFor(folders, parts) {
+        for (let i = 0; i < parts.length; i++) {
+          const key = parts.slice(0, i + 1).join('/');
+          if (folders.has(key)) {
+            continue;
+          }
+          const parent = folders.get(parts.slice(0, i).join('/'));
+          const response = await context.fetch(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: parts[i], parent }),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (response.ok) {
+            folders.set(key, body.id);
+          } else if (response.status === 409 && body.existing?.kind === 'folder') {
+            folders.set(key, body.existing.id);
+          } else {
+            throw { ...body, status: response.status };
+          }
+        }
+        return folders.get(parts.join('/'));
+      }
+
+      /**
+       * Downloads items (EXT-002): one file with its name, anything else as one archive. Every file comes
+       * from a signed, expiring link of the platform (EXT-004), which the app fetches without the
+       * session; the name is the one of the item now, whatever the name it was stored with.
+       */
+      async download(items) {
+        const t = this.t;
+        if (items.length === 0) {
+          return;
+        }
+        const body = { items: items.map((item) => item.id) };
+        if (items.length > 1) {
+          body.name = `${this.current?.name ?? t('root')}.zip`;
+        }
+        const response = await context.fetch(DOWNLOADS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        let download = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          this.say(t('notDownloaded', { reason: this.reason(download, response.status) }), true);
+          return;
+        }
+        this.say(t('preparing', { name: download.name }));
+        const until = Date.now() + DOWNLOAD_WAIT;
+        while (download.status === 'pending' && Date.now() < until) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          const again = await context.fetch(`${DOWNLOADS_API}/${encodeURIComponent(download.id)}`);
+          download = await again.json().catch(() => ({ status: 'failed' }));
+        }
+        if (download.status !== 'ready') {
+          this.say(t('notDownloaded', { reason: t('notReady') }), true);
+          return;
+        }
+        try {
+          let blob;
+          if (download.kind === 'file') {
+            blob = await fetched(download.entries[0].url);
+          } else {
+            const entries = [];
+            for (const entry of download.entries) {
+              entries.push({ path: entry.path, blob: entry.url ? await fetched(entry.url) : null });
+            }
+            blob = await zip(entries);
+          }
+          this.save(blob, download.name);
+          this.say(t('downloaded', { name: download.name }));
+        } catch (error) {
+          this.say(t('notDownloaded', { reason: error.message }), true);
+        }
+      }
+
+      /** Hands a file to the browser, which saves it with the name given. */
+      save(blob, name) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.hidden = true;
+        this.shadowRoot.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
+
+      /** Moves items into a folder, null for the root, keeping their identity and their shares (EXT-002). */
+      async move(items, target) {
+        const t = this.t;
+        const errors = [];
+        let moved = 0;
+        for (const item of items) {
+          if (item.id === target) {
+            continue;
+          }
+          const response = await context.fetch(`${ITEMS_API}/${encodeURIComponent(item.id)}/move`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parent: target }),
+          });
+          if (response.ok) {
+            moved += 1;
+          } else {
+            errors.push(this.reason(await response.json().catch(() => ({})), response.status));
+          }
+        }
+        this.selected = new Set();
+        await this.refresh();
+        if (errors.length > 0) {
+          this.say(t('notMoved', { reason: errors.join(' ') }), true);
+        } else {
+          this.say(moved === 1 ? t('movedOne', { name: items[0].name }) : t('moved', { count: moved }));
+        }
+      }
+
+      /** A dialog of the app: its title, its body and its actions; resolves with the value of the button. */
+      dialog(title, build) {
+        const dialog = this.$('dialog');
+        const form = dialog.querySelector('form');
+        const heading = document.createElement('h2');
+        heading.id = 'dialog-title';
+        heading.textContent = title;
+        form.replaceChildren(heading);
+        form.onsubmit = null;
+        const alert = document.createElement('p');
+        alert.setAttribute('role', 'alert');
+        build(form, alert);
+        form.append(alert);
+        return new Promise((resolve) => {
+          dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true });
+          dialog.returnValue = '';
+          dialog.showModal();
+        });
+      }
+
+      actions(form, confirm, { danger = false } = {}) {
+        const row = document.createElement('div');
+        row.className = 'actions';
+        // Cancel is not a submit button, so that Enter confirms.
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.textContent = this.t('cancel');
+        cancel.addEventListener('click', () => this.$('dialog').close('cancel'));
+        const ok = document.createElement('button');
+        ok.value = 'confirm';
+        ok.className = danger ? 'primary danger' : 'primary';
+        ok.textContent = confirm;
+        row.append(cancel, ok);
+        form.append(row);
+        return ok;
+      }
+
+      /** Asks for the new name of an item; a name used in its folder is refused, naming that item. */
+      async askRename(item) {
+        const t = this.t;
+        const dialog = this.$('dialog');
+        let input;
+        let alert;
+        const answer = this.dialog(t('renameTitle', { name: item.name }), (form, message) => {
+          alert = message;
+          input = document.createElement('input');
+          input.type = 'text';
+          input.required = true;
+          input.maxLength = 255;
+          input.value = item.name;
+          input.setAttribute('aria-label', t('newName'));
+          form.append(input);
+          this.actions(form, t('rename'));
+          form.onsubmit = async (event) => {
+            if (event.submitter?.value !== 'confirm') {
+              return;
+            }
+            event.preventDefault();
+            const response = await context.fetch(`${ITEMS_API}/${encodeURIComponent(item.id)}/rename`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: input.value }),
+            });
+            if (response.ok) {
+              dialog.close('renamed');
+            } else {
+              alert.textContent = this.reason(await response.json().catch(() => ({})), response.status);
+              input.focus();
+            }
+          };
+        });
+        const dot = item.kind === 'file' ? item.name.lastIndexOf('.') : -1;
+        input.focus();
+        input.setSelectionRange(0, dot > 0 ? dot : item.name.length);
+        if ((await answer) === 'renamed') {
+          await this.refresh();
+          this.say(t('renamed', { name: input.value.trim() }));
+        }
+      }
+
+      /** Asks to confirm the delete of items, with the number of items their folders hold. */
+      async askDelete(items) {
+        const t = this.t;
+        if (items.length === 0) {
+          return;
+        }
+        let held = 0;
+        for (const item of items.filter((each) => each.kind === 'folder')) {
+          const response = await context.fetch(`${ITEMS_API}/${encodeURIComponent(item.id)}/summary`);
+          if (response.ok) {
+            held += (await response.json()).items;
+          }
+        }
+        let question;
+        if (items.length === 1) {
+          const [item] = items;
+          question = item.kind === 'file'
+            ? t('confirmDeleteFile', { name: item.name })
+            : held === 0
+              ? t('confirmDeleteEmpty', { name: item.name })
+              : t(held === 1 ? 'confirmDeleteFolder_one' : 'confirmDeleteFolder_other', { name: item.name, count: held });
+        } else {
+          question = held === 0
+            ? t('confirmDeleteMany', { count: items.length })
+            : t(held === 1 ? 'confirmDeleteManyHeld_one' : 'confirmDeleteManyHeld_other', { count: items.length, held });
+        }
+        const answer = await this.dialog(t('deleteTitle'), (form) => {
+          const p = document.createElement('p');
+          p.textContent = question;
+          form.append(p);
+          this.actions(form, t('delete'), { danger: true });
+        });
+        if (answer !== 'confirm') {
+          return;
+        }
+        const errors = [];
+        for (const item of items) {
+          const response = await context.fetch(`${ITEMS_API}/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+          if (!response.ok) {
+            errors.push(this.reason(await response.json().catch(() => ({})), response.status));
+          }
+        }
+        this.selected = new Set();
+        // The open folder itself may be gone, from the tree.
+        if (items.some((item) => item.id === this.current?.id)) {
+          await this.open(this.current?.path.at(-2)?.id ?? null);
+          this.tree.clear();
+          await this.renderTree();
+        } else {
+          await this.refresh();
+        }
+        if (errors.length > 0) {
+          this.say(t('notDeleted', { reason: errors.join(' ') }), true);
+        } else {
+          this.say(items.length === 1 ? t('deletedOne', { name: items[0].name }) : t('deleted', { count: items.length }));
+        }
+      }
+
+      /** Asks for the folder to move items to, going through the folders the person may add to. */
+      async askMove(items) {
+        const t = this.t;
+        if (items.length === 0) {
+          return;
+        }
+        const moving = new Set(items.map((item) => item.id));
+        let here = openFolderId(this.current);
+        let list;
+        let where;
+        let ok;
+        const show = async () => {
+          const response = await context.fetch(here ? `${API}/${encodeURIComponent(here)}?sort=name` : `${API}?sort=name`);
+          if (!response.ok) {
+            here = null;
+            return show();
+          }
+          const folder = await response.json();
+          where.textContent = t('moveTo', { path: [t('root'), ...folder.path.map((step) => step.name)].join(' / ') });
+          const entries = [];
+          if (folder.id) {
+            const up = document.createElement('button');
+            up.type = 'button';
+            up.className = 'link';
+            up.textContent = t('up');
+            up.addEventListener('click', () => {
+              here = folder.path.at(-2)?.id ?? null;
+              void show();
+            });
+            entries.push(up);
+          }
+          for (const sub of folder.items.filter((item) => item.kind === 'folder' && !moving.has(item.id))) {
+            const go = document.createElement('button');
+            go.type = 'button';
+            go.className = 'link';
+            go.textContent = sub.name;
+            go.addEventListener('click', () => {
+              here = sub.id;
+              void show();
+            });
+            entries.push(go);
+          }
+          list.replaceChildren(
+            ...entries.map((entry) => {
+              const li = document.createElement('li');
+              li.append(entry);
+              return li;
+            }),
+          );
+          ok.disabled = !folder.canCreate;
+        };
+        const answer = this.dialog(
+          items.length === 1 ? t('moveTitle', { name: items[0].name }) : t('moveTitleMany', { count: items.length }),
+          (form) => {
+            where = document.createElement('p');
+            list = document.createElement('ul');
+            list.className = 'folders';
+            list.setAttribute('aria-label', t('folders'));
+            form.append(where, list);
+            ok = this.actions(form, t('moveHere'));
+          },
+        );
+        await show();
+        if ((await answer) === 'confirm') {
+          await this.move(items, here);
+        }
+      }
+
+      /** What a refusal of the API says, in the language of the person when the app knows it. */
+      reason(problem, status) {
+        if (problem?.existing) {
+          return this.t(problem.existing.kind === 'folder' ? 'takenFolder' : 'takenFile', { name: problem.existing.name });
+        }
+        return problem?.detail ?? String(status ?? '');
+      }
+
 
       say(message, error = false) {
         const status = this.$('[role=status]');
@@ -596,6 +1330,25 @@ function foldersOf(items) {
     .filter((item) => item.kind === 'folder')
     .map(({ id, name }) => ({ id, name }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Whether the person may change an item: rename, move or delete it. A folder of the tree is checked by the API. */
+function editable(item) {
+  return item.level === undefined || item.level === 'edit' || item.level === 'manage';
+}
+
+/** The content of a signed link, without the session of the person (EXT-004). */
+async function fetched(url) {
+  const response = await fetch(url, { credentials: 'omit' });
+  if (!response.ok) {
+    throw new Error(String(response.status));
+  }
+  return response.blob();
+}
+
+/** The folder open in the app, or null at the root and in Shared with me. */
+function openFolderId(folder) {
+  return folder?.id && folder.id !== SHARED ? folder.id : null;
 }
 
 function cell(text, className) {
