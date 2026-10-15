@@ -30,6 +30,16 @@ import { zip } from './zip.js';
  * and the detail show the placeholder of the platform (mk-reference-placeholder, MK-135) for the kind,
  * which tells administrators which extension to install or turn on; when the extension comes or goes
  * (MK-133), the open page shows the files again, without a reload.
+ *
+ * A file has its sheet at /app/catalog?file=<id> (EXT-006), where the search of the platform opens it:
+ * what it is, its folder, who has access, its download, and the resources of other extensions it is
+ * linked to, each resolved by the kernel (MK-135) to its title and link or to the placeholder of the
+ * platform while its extension is absent. The detail of a file in a list shows the same links. Other
+ * extensions show the documents linked to their resources with the element
+ * mosaikit-ext-catalog-documents, which this module defines: given the resource in its property resource
+ * ({ extension, type, id }), it lists the documents linked to it that the person reads, downloads them,
+ * and links and unlinks them for those whom the extension of the resource lets (contract
+ * linked-documents, MK-134).
  */
 
 const ELEMENT = 'mosaikit-ext-catalog';
@@ -38,6 +48,12 @@ const SHARED_API = '/api/v1/ext/catalog/shared';
 const ITEMS_API = '/api/v1/ext/catalog/items';
 const UPLOADS_API = '/api/v1/ext/catalog/uploads';
 const DOWNLOADS_API = '/api/v1/ext/catalog/downloads';
+/** The sheet of a file, the links of documents to resources of other extensions, and the search (EXT-006). */
+const FILES_API = '/api/v1/ext/catalog/files';
+const LINKS_API = '/api/v1/ext/catalog/links';
+const SEARCH_API = '/api/v1/ext/catalog/search';
+/** The element with which other extensions list the documents linked to a resource of theirs (EXT-006). */
+const DOCUMENTS = 'mosaikit-ext-catalog-documents';
 /** The extension point of the kinds of files of other extensions, version 1 (EXT-105). */
 const FILE_KINDS = 'catalog.file-kind';
 /** Where the kernel resolves references, here to the kind of an absent extension (MK-135). */
@@ -153,6 +169,14 @@ const STYLE = `
   section.detail .preview { border: 1px solid var(--mk-line); border-radius: var(--mk-radius); padding: 8px; margin: 8px 0;
                             max-height: 320px; overflow: auto; background: var(--mk-bg); }
   section.detail .kind-actions, section.detail .file-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  section.detail h2 a { color: inherit; }
+  section.links { margin: 12px 0; }
+  section.links h3 { margin: 0 0 4px; font-size: 15px; }
+  ul.links { list-style: none; margin: 4px 0; padding: 0; }
+  ul.links li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 6px 0;
+                border-bottom: 1px solid var(--mk-line); }
+  ul.links li > :first-child { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+  ul.links li button { padding: 2px 8px; font-size: 13px; }
   [hidden] { display: none !important; }
 `;
 
@@ -166,7 +190,7 @@ const extension = {
     class Catalog extends HTMLElement {
       constructor() {
         super();
-        this.onPopState = () => void this.open(folderInAddress(), { push: false });
+        this.onPopState = () => void this.navigate();
       }
 
       connectedCallback() {
@@ -194,9 +218,13 @@ const extension = {
         this.stopPresence = context.extensions?.subscribe?.((change) => this.onPresence(change));
         /** The file whose detail is shown. */
         this.detail = null;
+        /** The sheet of a file, when the app shows one instead of a folder (EXT-006). */
+        this.sheet = null;
+        /** The links shown in the detail, with what the kernel said of their resources (EXT-006). */
+        this.links = null;
         this.render();
         window.addEventListener('popstate', this.onPopState);
-        void this.open(folderInAddress(), { push: false });
+        void this.navigate();
       }
 
       disconnectedCallback() {
@@ -204,6 +232,13 @@ const extension = {
         this.stopPresence?.();
         this.stopPresence = undefined;
         clearTimeout(this.settleTimer);
+        clearTimeout(this.linksTimer);
+      }
+
+      /** Shows what the address names: the sheet of a file, a folder, Shared with me or the root. */
+      navigate() {
+        const file = fileInAddress();
+        return file ? this.openFile(file, { push: false }) : this.open(folderInAddress(), { push: false });
       }
 
       render() {
@@ -267,6 +302,11 @@ const extension = {
                 <div class="absent" hidden></div>
                 <div class="preview" hidden></div>
                 <div class="kind-actions" role="group" hidden></div>
+                <section class="links" aria-labelledby="links-title">
+                  <h3 id="links-title"></h3>
+                  <ul class="links"></ul>
+                  <p class="muted no-links" hidden></p>
+                </section>
                 <div class="file-actions">
                   <button type="button" class="download-file"></button>
                   <button type="button" class="replace"></button>
@@ -324,7 +364,16 @@ const extension = {
         $('section.access button.share').textContent = t('share');
         $('section.access button.share').addEventListener('click', () => this.share());
         $('section.detail button.close').textContent = t('close');
-        $('section.detail button.close').addEventListener('click', () => this.hideDetail());
+        $('section.detail button.close').addEventListener('click', () => {
+          // The sheet of a file closes to its folder, or to the root when the person does not read it.
+          if (this.sheet) {
+            void this.open(this.sheet.path.at(-1)?.id ?? null);
+          } else {
+            this.hideDetail();
+          }
+        });
+        $('#links-title').textContent = t('linkedTo');
+        $('section.detail .no-links').textContent = t('noLinks');
         $('section.detail button.download-file').textContent = t('download');
         $('section.detail button.download-file').addEventListener('click', () => {
           if (this.detail) {
@@ -407,7 +456,9 @@ const extension = {
 
         // Dropped from the computer onto the open folder, or items dragged onto it.
         // Shared with me is no folder: nothing is dropped there.
-        this.dropTarget($('section.content'), () => (this.current?.id === SHARED ? undefined : (this.current?.id ?? null)));
+        this.dropTarget($('section.content'), () =>
+          this.sheet || this.current?.id === SHARED ? undefined : (this.current?.id ?? null),
+        );
         $('tbody').addEventListener('keydown', (event) => {
           const row = event.target.closest?.('tr');
           const item = row && this.current?.items.find((each) => each.id === row.dataset.id);
@@ -437,6 +488,8 @@ const extension = {
         const response = await context.fetch(url);
         if (response.status === 404) {
           this.current = null;
+          this.sheet = null;
+          this.hideDetail();
           this.showNotFound();
           await this.renderTree();
           return;
@@ -446,6 +499,7 @@ const extension = {
           return;
         }
         const folder = await response.json();
+        this.sheet = null;
         if ((this.current?.id ?? null) !== (id ?? null)) {
           this.selected = new Set();
         }
@@ -481,8 +535,51 @@ const extension = {
         }
       }
 
+      /**
+       * Opens the sheet of a file (EXT-006): what it is, where it is, who has access, its download and the
+       * resources it is linked to; a file the person cannot read is not found, as one that does not exist.
+       */
+      async openFile(id, { push = true } = {}) {
+        if (push) {
+          history.pushState(null, '', fileAddress(id));
+        }
+        const response = await context.fetch(`${FILES_API}/${encodeURIComponent(id)}`);
+        if (response.status === 404) {
+          this.current = null;
+          this.sheet = null;
+          this.hideDetail();
+          this.showNotFound(true);
+          await this.renderTree();
+          return;
+        }
+        if (!response.ok) {
+          this.say(this.t('notLoaded', { status: response.status }), true);
+          return;
+        }
+        const sheet = await response.json();
+        this.sheet = sheet;
+        this.current = null;
+        this.selected = new Set();
+        for (const step of sheet.path) {
+          this.expanded.add(step.id);
+        }
+        const $ = this.$;
+        for (const selector of ['.not-found', '.table', '.empty', 'button.new', 'form.create', '.toolbar', '.shortcuts']) {
+          $(selector).hidden = true;
+        }
+        this.renderCrumbs(sheet.path, sheet.file.name);
+        this.showDetail(sheet.file, sheet.links);
+        void this.resolveAbsent([sheet.file]);
+        await this.renderTree();
+        await this.showAccess(sheet.file.id);
+      }
+
       /** Loads the open view again, the tree, and who has access to the item shown, after a change. */
       async refresh() {
+        if (this.sheet) {
+          await this.openFile(this.sheet.file.id, { push: false });
+          return;
+        }
         // Items may have moved, been renamed or deleted (EXT-002): read the tree again too.
         this.tree.clear();
         const shown = this.access?.id;
@@ -792,7 +889,7 @@ const extension = {
       }
 
       /** Shows the detail of a file: what it is, its kind and state, its preview and its actions (EXT-105). */
-      showDetail(item) {
+      showDetail(item, links) {
         const t = this.t;
         const $ = this.$;
         const same = this.detail?.id === item.id && this.detail?.changed === item.changed;
@@ -800,7 +897,21 @@ const extension = {
         const kind = this.kindOf(item);
         const section = $('section.detail');
         section.hidden = false;
-        $('#detail-title').textContent = item.name;
+        // In a list, the name of the file opens its sheet (EXT-006).
+        if (this.sheet) {
+          $('#detail-title').textContent = item.name;
+        } else {
+          const sheet = document.createElement('a');
+          sheet.href = fileAddress(item.id);
+          sheet.textContent = item.name;
+          sheet.addEventListener('click', (event) => {
+            if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+              event.preventDefault();
+              void this.openFile(item.id);
+            }
+          });
+          $('#detail-title').replaceChildren(sheet);
+        }
         const facts = [
           [t('type'), item.contentType ?? ''],
           [t('size'), this.bytes(item.size ?? 0)],
@@ -809,6 +920,13 @@ const extension = {
         if (kind && item.fileKind.state) {
           const state = this.stateText(kind, item.fileKind.state);
           facts.push([t('state'), item.fileKind.stateDetail ? `${state}: ${item.fileKind.stateDetail}` : state]);
+        }
+        if (this.sheet) {
+          facts.push(
+            [t('folder'), [t('root'), ...this.sheet.path.map((step) => step.name)].join(' / ')],
+            [t('owner'), item.owner ? (item.owner.name ?? '') : t('theOrganization')],
+            [t('changed'), this.dates.format(new Date(item.changed))],
+          );
         }
         $('section.detail dl').replaceChildren(
           ...facts.flatMap(([term, value]) => {
@@ -844,6 +962,128 @@ const extension = {
         );
         actions.hidden = actions.childElementCount === 0;
         $('section.detail button.replace').hidden = !editable(item);
+        if (!same || links) {
+          void this.showLinks(item, links);
+        }
+      }
+
+      /**
+       * Shows the resources of other extensions a file is linked to (EXT-006), as the kernel resolves them
+       * for the person (MK-135): the title of each, which opens it, or the placeholder of the platform
+       * while its extension is absent or it is not available; the link stays either way.
+       */
+      async showLinks(item, given) {
+        const t = this.t;
+        let links = given;
+        if (!links) {
+          const response = await context.fetch(`${FILES_API}/${encodeURIComponent(item.id)}`);
+          if (!response.ok || this.detail?.id !== item.id) {
+            return;
+          }
+          links = (await response.json()).links;
+        }
+        let resolved = [];
+        if (links.length > 0) {
+          try {
+            const response = await context.fetch(REFERENCES, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(links.slice(0, 100).map((link) => link.resource)),
+            });
+            resolved = response.ok ? await response.json() : [];
+          } catch {
+            resolved = [];
+          }
+        }
+        if (this.detail?.id !== item.id) {
+          return;
+        }
+        this.links = { item, links, resolved };
+        const list = this.$('ul.links');
+        list.setAttribute('aria-label', t('linksOf', { name: item.name }));
+        list.replaceChildren(...links.map((link, index) => this.linkEntry(item, link, resolved[index])));
+        this.$('section.detail .no-links').hidden = links.length > 0;
+        this.settleLinks();
+      }
+
+      /** A resource a file is linked to: its title, or the placeholder of the platform; and Remove link. */
+      linkEntry(item, link, resolved) {
+        const t = this.t;
+        const li = document.createElement('li');
+        li.dataset.extension = link.resource.extension;
+        if (resolved?.status === 'available') {
+          const a = document.createElement('a');
+          a.href = resolved.link;
+          a.textContent = resolved.title;
+          li.append(a);
+        } else if (customElements.get(PLACEHOLDER)) {
+          const placeholder = document.createElement(PLACEHOLDER);
+          placeholder.className = 'absent-link';
+          placeholder.setAttribute('label', t('linkedResource'));
+          placeholder.setAttribute('locale', String(context.locale ?? 'en'));
+          placeholder.reference = resolved ?? { ...link.resource, status: 'extension-absent' };
+          li.append(placeholder);
+        } else {
+          const note = document.createElement('p');
+          note.className = 'muted';
+          note.setAttribute('role', 'note');
+          note.textContent = t('kindAbsent', { kind: t('linkedResource') });
+          li.append(note);
+        }
+        if (link.canUnlink) {
+          const unlink = document.createElement('button');
+          unlink.type = 'button';
+          unlink.className = 'unlink';
+          unlink.textContent = t('unlink');
+          const other = resolved?.status === 'available' ? resolved.title : t('linkedResource');
+          unlink.setAttribute('aria-label', t('unlinkFrom', { name: item.name, other }));
+          unlink.addEventListener('click', () => void this.unlink(item, link));
+          li.append(unlink);
+        }
+        return li;
+      }
+
+      /** Removes a link of a file to a resource of another extension (EXT-006). */
+      async unlink(item, link) {
+        const response = await context.fetch(`${LINKS_API}/${encodeURIComponent(link.id)}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const problem = await response.json().catch(() => ({}));
+          this.say(this.t('notUnlinked', { reason: this.reason(problem, response.status) }), true);
+          return;
+        }
+        this.say(this.t('unlinked'));
+        if (this.sheet) {
+          await this.refresh();
+        } else {
+          await this.showLinks(item);
+        }
+      }
+
+      /**
+       * Resolves the links shown again, a few times, while the kernel and the presence the shell keeps
+       * disagree on the extension of a resource: the shell may hear of a change just before the kernel
+       * answers it.
+       */
+      settleLinks() {
+        clearTimeout(this.linksTimer);
+        const shown = this.links;
+        const presence = context.extensions;
+        if (!shown || typeof presence?.isActive !== 'function') {
+          return;
+        }
+        const differ = shown.links.some((link, index) => {
+          const status = shown.resolved[index]?.status;
+          return presence.isActive(link.resource.extension) === (status === 'extension-absent');
+        });
+        if (!differ || (this.linksSettling ?? 0) >= SETTLE_TRIES) {
+          return;
+        }
+        this.linksSettling = (this.linksSettling ?? 0) + 1;
+        this.linksTimer = setTimeout(() => {
+          if (this.links === shown) {
+            void this.showLinks(shown.item, shown.links);
+          }
+        }, 1000);
       }
 
       /**
@@ -917,6 +1157,11 @@ const extension = {
 
       /** An extension came or went in the organization (MK-133): the files of its kinds are shown again. */
       onPresence(change) {
+        // EXT-006: the resources of that extension among the links shown are resolved again.
+        if (this.links?.links.some((link) => link.resource.extension === change.extension)) {
+          this.linksSettling = 0;
+          void this.showLinks(this.links.item, this.links.links);
+        }
         const shown = new Set(
           (this.current?.items ?? []).filter((item) => item.fileKind).map((item) => item.fileKind.extension),
         );
@@ -952,6 +1197,8 @@ const extension = {
 
       hideDetail() {
         this.detail = null;
+        this.links = null;
+        clearTimeout(this.linksTimer);
         this.$('section.detail').hidden = true;
         this.$('section.detail .preview').replaceChildren();
       }
@@ -1042,25 +1289,35 @@ const extension = {
         return `${this.numbers.format(value)} ${units[unit]}`;
       }
 
-      renderCrumbs(path) {
+      /** The breadcrumbs of a folder, or of the sheet of a file in it, whose name is the last step. */
+      renderCrumbs(path, file) {
         const list = this.$('nav.crumbs ol');
         // Shared with me is not under the files of the organization.
         const steps = path[0]?.id === SHARED ? path : [{ id: null, name: this.t('root') }, ...path];
-        list.replaceChildren(
-          ...steps.map((step, index) => {
-            const li = document.createElement('li');
-            const a = this.link(step.id, step.name);
-            if (index === steps.length - 1) {
-              a.setAttribute('aria-current', 'page');
-            }
-            li.append(a);
-            return li;
-          }),
-        );
+        const items = steps.map((step, index) => {
+          const li = document.createElement('li');
+          const a = this.link(step.id, step.name);
+          if (index === steps.length - 1 && file === undefined) {
+            a.setAttribute('aria-current', 'page');
+          }
+          li.append(a);
+          return li;
+        });
+        if (file !== undefined) {
+          const li = document.createElement('li');
+          const span = document.createElement('span');
+          span.setAttribute('aria-current', 'page');
+          span.textContent = file;
+          li.append(span);
+          items.push(li);
+        }
+        list.replaceChildren(...items);
       }
 
-      showNotFound() {
+      /** Says that the folder, or the file of a sheet, does not exist or is not shared with the person. */
+      showNotFound(file = false) {
         const $ = this.$;
+        $('.not-found h2').textContent = this.t(file ? 'fileNotFound' : 'notFound');
         $('.table').hidden = true;
         $('.empty').hidden = true;
         $('button.new').hidden = true;
@@ -1444,15 +1701,7 @@ const extension = {
 
       /** Hands a file to the browser, which saves it with the name given. */
       save(blob, name) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = name;
-        a.hidden = true;
-        this.shadowRoot.append(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        saveBlob(this.shadowRoot, blob, name);
       }
 
       /** Moves items into a folder, null for the root, keeping their identity and their shares (EXT-002). */
@@ -1707,8 +1956,295 @@ const extension = {
     }
 
     customElements.define(ELEMENT, Catalog);
+
+    /**
+     * The documents linked to a resource of another extension (EXT-006), for the sheet of that resource:
+     * given the resource in its property resource ({ extension, type, id }, as its extension registered
+     * it with the platform) and its name in the attribute label, it lists the documents linked to it that
+     * the person reads, each opening its sheet in the catalog and downloaded through a signed, expiring
+     * link (EXT-004); to those whom the extension of the resource lets (contract linked-documents,
+     * MK-134), it links documents found by name, and removes links.
+     */
+    class Documents extends HTMLElement {
+      set resource(resource) {
+        this.shown = resource;
+        if (this.isConnected) {
+          void this.load();
+        }
+      }
+
+      get resource() {
+        return this.shown;
+      }
+
+      connectedCallback() {
+        this.t = translator(context.locale);
+        this.numbers = new Intl.NumberFormat(context.locale, { maximumFractionDigits: 1 });
+        this.render();
+        void this.load();
+      }
+
+      static get observedAttributes() {
+        return ['label'];
+      }
+
+      attributeChangedCallback() {
+        if (this.shadowRoot && this.t) {
+          this.labels();
+        }
+      }
+
+      /** The name of the resource, for the labels: the attribute label, or Documents. */
+      get name() {
+        return this.getAttribute('label') || this.t('documents');
+      }
+
+      render() {
+        const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+          <style>${STYLE}
+            :host { display: block; }
+            section.documents h2 { margin: 0 0 4px; font-size: 16px; }
+            ul.documents { list-style: none; margin: 4px 0; padding: 0; }
+            ul.documents li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 6px 0;
+                              border-bottom: 1px solid var(--mk-line); }
+            ul.documents li a { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+            ul.documents li button { padding: 2px 8px; font-size: 13px; }
+            dialog ul.found { list-style: none; margin: 8px 0; padding: 0; max-height: 280px; overflow-y: auto; }
+            dialog ul.found li { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 4px 0; }
+          </style>
+          <section class="documents" aria-labelledby="documents-title">
+            <h2 id="documents-title"></h2>
+            <p role="status" aria-live="polite"></p>
+            <ul class="documents"></ul>
+            <p class="muted empty" hidden></p>
+            <button type="button" class="link-document" hidden></button>
+          </section>
+          <dialog aria-labelledby="link-title">
+            <form method="dialog">
+              <h2 id="link-title"></h2>
+              <input type="text" class="search" autocomplete="off" />
+              <p class="muted hint"></p>
+              <ul class="found"></ul>
+              <p role="alert"></p>
+              <div class="actions"><button value="close" class="close"></button></div>
+            </form>
+          </dialog>`;
+        this.$ = (selector) => root.querySelector(selector);
+        const $ = this.$;
+        $('#documents-title').textContent = this.t('documents');
+        $('.empty').textContent = this.t('noDocuments');
+        $('button.link-document').textContent = this.t('linkDocument');
+        $('button.link-document').addEventListener('click', () => this.askLink());
+        $('dialog .hint').textContent = this.t('searchHint');
+        $('dialog button.close').textContent = this.t('close');
+        $('dialog input.search').addEventListener('input', () => {
+          clearTimeout(this.searchTimer);
+          this.searchTimer = setTimeout(() => void this.search(), 250);
+        });
+        this.labels();
+      }
+
+      labels() {
+        const $ = this.$;
+        $('ul.documents').setAttribute('aria-label', this.t('documentsOf', { name: this.name }));
+        $('button.link-document').setAttribute('aria-label', this.t('linkDocumentTo', { name: this.name }));
+        $('#link-title').textContent = this.t('linkDocumentTo', { name: this.name });
+        $('dialog input.search').setAttribute('aria-label', this.t('searchFiles'));
+      }
+
+      /** The query of the resource, for the API of the links. */
+      query() {
+        const { extension, type, id } = this.shown ?? {};
+        return new URLSearchParams({ extension: extension ?? '', type: type ?? '', id: id ?? '' }).toString();
+      }
+
+      /** Lists the documents linked to the resource that the person reads. */
+      async load() {
+        if (!this.$ || !this.shown) {
+          return;
+        }
+        const response = await context.fetch(`${LINKS_API}?${this.query()}`);
+        if (!response.ok) {
+          this.say(this.t('documentsNotLoaded', { status: response.status }), true);
+          this.$('ul.documents').replaceChildren();
+          this.$('.empty').hidden = true;
+          this.$('button.link-document').hidden = true;
+          return;
+        }
+        const found = await response.json();
+        this.canLink = found.canLink;
+        this.$('ul.documents').replaceChildren(...found.documents.map((document) => this.entry(document)));
+        this.$('.empty').hidden = found.documents.length > 0;
+        this.$('button.link-document').hidden = !found.canLink;
+      }
+
+      entry({ link, file, canUnlink }) {
+        const t = this.t;
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = fileAddress(file.id);
+        a.textContent = file.name;
+        const size = document.createElement('span');
+        size.className = 'muted';
+        size.textContent = this.bytes(file.size ?? 0);
+        const download = document.createElement('button');
+        download.type = 'button';
+        download.className = 'download';
+        download.textContent = t('download');
+        download.setAttribute('aria-label', t('downloadItem', { name: file.name }));
+        download.addEventListener('click', () => void this.download(file));
+        li.append(a, size, download);
+        if (canUnlink) {
+          const unlink = document.createElement('button');
+          unlink.type = 'button';
+          unlink.className = 'unlink';
+          unlink.textContent = t('unlink');
+          unlink.setAttribute('aria-label', t('unlinkFrom', { name: file.name, other: this.name }));
+          unlink.addEventListener('click', () => void this.unlink(link));
+          li.append(unlink);
+        }
+        return li;
+      }
+
+      /** Downloads a document through a signed, expiring link, fetched without the session (EXT-004). */
+      async download(file) {
+        const t = this.t;
+        const response = await context.fetch(DOWNLOADS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: [file.id] }),
+        });
+        const download = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          this.say(t('notDownloaded', { reason: download.detail ?? String(response.status) }), true);
+          return;
+        }
+        try {
+          saveBlob(this.shadowRoot, await fetched(download.entries[0].url), download.name);
+          this.say(t('downloaded', { name: download.name }));
+        } catch (error) {
+          this.say(t('notDownloaded', { reason: error.message }), true);
+        }
+      }
+
+      async unlink(link) {
+        const response = await context.fetch(`${LINKS_API}/${encodeURIComponent(link)}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const problem = await response.json().catch(() => ({}));
+          this.say(this.t('notUnlinked', { reason: problem.detail ?? String(response.status) }), true);
+          return;
+        }
+        this.say(this.t('unlinked'));
+        await this.load();
+      }
+
+      /** Opens the dialog that finds a file by name and links it to the resource. */
+      askLink() {
+        const $ = this.$;
+        $('dialog input.search').value = '';
+        $('dialog ul.found').replaceChildren();
+        $('dialog [role=alert]').textContent = '';
+        $('dialog').showModal();
+        $('dialog input.search').focus();
+      }
+
+      /** The files the person reads whose name has the words typed, with Link on each. */
+      async search() {
+        const t = this.t;
+        const $ = this.$;
+        const text = $('dialog input.search').value.trim();
+        if (text === '') {
+          $('dialog ul.found').replaceChildren();
+          return;
+        }
+        const response = await context.fetch(`${SEARCH_API}?${new URLSearchParams({ q: text, kind: 'file', limit: '20' })}`);
+        if (!response.ok || $('dialog input.search').value.trim() !== text) {
+          return;
+        }
+        const { results } = await response.json();
+        if (results.length === 0) {
+          const li = document.createElement('li');
+          li.className = 'muted';
+          li.textContent = t('noFiles');
+          $('dialog ul.found').replaceChildren(li);
+          return;
+        }
+        $('dialog ul.found').replaceChildren(
+          ...results.map((result) => {
+            const li = document.createElement('li');
+            const name = document.createElement('span');
+            name.textContent = result.detail ? `${result.title} (${result.detail})` : result.title;
+            const link = document.createElement('button');
+            link.type = 'button';
+            link.textContent = t('linkFile', { name: result.title });
+            link.addEventListener('click', () => void this.link(result));
+            li.append(name, link);
+            return li;
+          }),
+        );
+      }
+
+      async link(result) {
+        const response = await context.fetch(LINKS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: result.resource.id, resource: this.shown }),
+        });
+        if (!response.ok) {
+          const problem = await response.json().catch(() => ({}));
+          this.$('dialog [role=alert]').textContent = this.t('notLinked', { reason: problem.detail ?? String(response.status) });
+          return;
+        }
+        this.$('dialog').close();
+        this.say(this.t('linked', { name: result.title }));
+        await this.load();
+      }
+
+      bytes(size) {
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let value = size;
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+          value /= 1024;
+          unit += 1;
+        }
+        return `${this.numbers.format(value)} ${units[unit]}`;
+      }
+
+      say(message, error = false) {
+        const status = this.$('[role=status]');
+        status.classList.toggle('error', error);
+        status.textContent = message;
+      }
+    }
+
+    customElements.define(DOCUMENTS, Documents);
   },
 };
+
+/** The file whose sheet the address of the page names (EXT-006), or null. */
+function fileInAddress() {
+  return new URL(location.href).searchParams.get('file');
+}
+
+/** The address of the sheet of a file (EXT-006). */
+function fileAddress(id) {
+  return `${ROUTE}?file=${encodeURIComponent(id)}`;
+}
+
+/** Hands a file to the browser, which saves it with the name given. */
+function saveBlob(root, blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.hidden = true;
+  root.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 /** The folder in the address of the page, SHARED for Shared with me, or null for the root. */
 function folderInAddress() {

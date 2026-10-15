@@ -9,11 +9,15 @@ platform: '>=0.1 <1'
 backend:
   jar: lib/ext-catalog.jar
   api: catalog
-# Kinds of files that other extensions add to the file manager (EXT-105), through the contract
-# file-kind of the catalog (MK-134), whose interfaces are in the library ext-catalog-api.
+# Kinds of files that other extensions add to the file manager (EXT-105), and the resources of other
+# extensions to which documents are linked (EXT-006), through the contracts file-kind and
+# linked-documents of the catalog (MK-134), whose interfaces are in the library ext-catalog-api.
 contracts:
   provides:
     - name: file-kind
+      versions: [1]
+      api: io.github.mosaikit.ext:ext-catalog-api
+    - name: linked-documents
       versions: [1]
       api: io.github.mosaikit.ext:ext-catalog-api
 database:
@@ -101,8 +105,17 @@ contributes:
       order: 40
       i18n:
         it: { title: Catalogo }
+  # The pill of the folders and files in the search of the platform (MK-040, EXT-006): the platform
+  # calls GET /api/v1/ext/catalog/search as the person, and drops what they cannot read.
+  search.provider:
+    - id: files
+      title: Files
+      path: search
+      order: 30
+      i18n:
+        it: { title: File }
 libraries:
   # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
-  - jar: 'lib/ext-catalog-api-1.1.0.jar'
-    coordinates: 'io.github.mosaikit.ext:ext-catalog-api:1.1.0'
-    sha256: 'b7c26e130afdbaffb932d8c772a2be2b09e6dc919ff340b71371d9f23e7e8c11'
+  - jar: 'lib/ext-catalog-api-1.2.0.jar'
+    coordinates: 'io.github.mosaikit.ext:ext-catalog-api:1.2.0'
+    sha256: '59b3230e5ddf09412fe40695d11af002434900ef781c699a5e96c545769b2d64'

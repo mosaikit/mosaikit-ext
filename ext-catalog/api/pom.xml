@@ -19,9 +19,9 @@
     -->
     <groupId>io.github.mosaikit.ext</groupId>
     <artifactId>ext-catalog-api</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
     <name>Catalog API</name>
-    <description>The contracts of the catalog that other extensions implement: kinds of files (EXT-105), with links to their content (EXT-107).</description>
+    <description>The contracts of the catalog that other extensions implement: kinds of files (EXT-105), with links to their content (EXT-107), and documents linked to resources of other extensions (EXT-006).</description>
     <url>https://github.com/mosaikit/mosaikit-ext/tree/main/ext-catalog/api</url>
     <licenses>
         <license>
