@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Massimo Antonini
 // SPDX-License-Identifier: MPL-2.0
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { api, bench } from '@mosaikit/testing/playwright';
 
 /** Helpers of the tests: folders and files made through the API of the extension, as a person. */
@@ -69,4 +69,110 @@ export async function share(
 /** Opens the catalog at a folder, by its address. */
 export async function openFolder(page: Page, id: string | null): Promise<void> {
   await page.goto(`${bench().baseUrl}/app/catalog${id ? `?folder=${id}` : ''}`);
+}
+
+// EXT-002, EXT-004: downloads, uploads dropped from the computer, archives.
+
+export interface Download {
+  id: string | null;
+  kind: 'file' | 'archive';
+  name: string;
+  status: 'pending' | 'ready' | 'failed';
+  expires: string | null;
+  entries: { path: string; url: string | null }[];
+}
+
+/** Asks for a download of items and waits until its signed links are made. */
+export async function download(
+  person: Person,
+  items: string[],
+  options: { name?: string; validFor?: number } = {},
+): Promise<{ status: number; download: Download }> {
+  const { status, body } = await api(person, `${API}/downloads`, {
+    method: 'POST',
+    body: JSON.stringify({ items, ...options }),
+  });
+  let current = body as Download;
+  if (status === 202) {
+    await expect
+      .poll(
+        async () => {
+          current = (await api(person, `${API}/downloads/${current.id}`)).body as Download;
+          return current.status;
+        },
+        { timeout: 30_000 },
+      )
+      .not.toBe('pending');
+  }
+  return { status, download: current };
+}
+
+/** Fetches a signed link without any session, as anyone who holds it does. */
+export async function fetchLink(url: string): Promise<{ status: number; text: string }> {
+  const response = await fetch(bench().baseUrl + url);
+  return { status: response.status, text: await response.text() };
+}
+
+/** A file or a folder of a drop from the computer: a folder has its entries. */
+export type Dropped = { name: string; content: string } | { name: string; entries: Dropped[] };
+
+/**
+ * Drops files and folders from the computer onto an element of the app, as the browser gives them:
+ * the items of the drop with their entries of the file system (webkitGetAsEntry), which hold the
+ * structure of a folder. Playwright cannot drag files of the computer, so the event is made here.
+ */
+export async function dropFiles(target: Locator, dropped: Dropped[]): Promise<void> {
+  await target.evaluate((element, list: Dropped[]) => {
+    type Entry = {
+      name: string;
+      isFile: boolean;
+      isDirectory: boolean;
+      file?: (resolve: (file: File) => void) => void;
+      createReader?: () => { readEntries: (resolve: (entries: Entry[]) => void) => void };
+    };
+    const entry = (item: Dropped): Entry => {
+      if ('content' in item) {
+        const file = new File([item.content], item.name, { type: 'text/plain' });
+        return { name: item.name, isFile: true, isDirectory: false, file: (resolve) => resolve(file) };
+      }
+      const children = item.entries.map(entry);
+      return {
+        name: item.name,
+        isFile: false,
+        isDirectory: true,
+        createReader: () => {
+          let given = false;
+          return {
+            readEntries: (resolve) => {
+              resolve(given ? [] : children);
+              given = true;
+            },
+          };
+        },
+      };
+    };
+    const items = list.map((item) => ({ kind: 'file', webkitGetAsEntry: () => entry(item) }));
+    const dataTransfer = { types: ['Files'], items, files: [], getData: () => '', dropEffect: 'none' };
+    for (const type of ['dragover', 'drop']) {
+      const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
+      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+      element.dispatchEvent(event);
+    }
+  }, dropped);
+}
+
+/** The entries of a ZIP archive whose files are stored as they are: name and content. */
+export function unzip(archive: Buffer): { name: string; content: string }[] {
+  const entries: { name: string; content: string }[] = [];
+  let at = 0;
+  while (archive.readUInt32LE(at) === 0x04034b50) {
+    const size = archive.readUInt32LE(at + 18);
+    const nameLength = archive.readUInt16LE(at + 26);
+    const extra = archive.readUInt16LE(at + 28);
+    const name = archive.subarray(at + 30, at + 30 + nameLength).toString('utf8');
+    const start = at + 30 + nameLength + extra;
+    entries.push({ name, content: archive.subarray(start, start + size).toString('utf8') });
+    at = start + size;
+  }
+  return entries;
 }

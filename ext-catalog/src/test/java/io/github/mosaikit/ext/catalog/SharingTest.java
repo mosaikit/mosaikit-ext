@@ -247,8 +247,28 @@ class SharingTest {
         }
 
         @Override
+        public List<Item> all() {
+            return List.copyOf(all.values());
+        }
+
+        @Override
         public void insert(Item item) {
             all.put(item.getId(), item);
+        }
+
+        @Override
+        public void update(Item item) {
+            all.put(item.getId(), item);
+        }
+
+        @Override
+        public void delete(Item item) {
+            all.remove(item.getId());
+        }
+
+        @Override
+        public void deleteAll() {
+            all.clear();
         }
     }
 

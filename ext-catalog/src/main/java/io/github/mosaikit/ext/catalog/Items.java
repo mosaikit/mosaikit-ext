@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MPL-2.0
 package io.github.mosaikit.ext.catalog;
 
+import jakarta.data.repository.Delete;
 import jakarta.data.repository.Find;
 import jakarta.data.repository.Insert;
 import jakarta.data.repository.Query;
 import jakarta.data.repository.Repository;
+import jakarta.data.repository.Update;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +35,20 @@ public interface Items {
     @Query("select i.parentId from Item i where i.parentId in :parents")
     List<UUID> parentsOfChildren(Collection<UUID> parents);
 
+    /** Every item of the organization. */
+    @Query("from Item i")
+    List<Item> all();
+
     @Insert
     void insert(Item item);
+
+    @Update
+    void update(Item item);
+
+    @Delete
+    void delete(Item item);
+
+    /** Deletes every item of the organization, in one statement, so that parents may go before children. */
+    @Query("delete from Item")
+    void deleteAll();
 }

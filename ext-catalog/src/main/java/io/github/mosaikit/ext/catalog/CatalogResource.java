@@ -227,6 +227,10 @@ public class CatalogResource {
             stored = files.store(EXTENSION, FileStorage.NewFile.of(name, type).attachedTo(ref), content);
         } catch (IllegalArgumentException e) {
             throw problem(Response.Status.BAD_REQUEST, e.getMessage());
+        } catch (IllegalStateException e) {
+            // MK-076: the file does not fit the storage quota of the organization; the message of the
+            // kernel names the limit. The app checks the whole upload before it starts (EXT-002).
+            throw problem(Response.Status.FORBIDDEN, e.getMessage());
         }
         Item created = Item.file(
                 itemId, organization.require(), folder.getId(), name, stored.id(), stored.size(), type, Instant.now());
@@ -236,7 +240,7 @@ public class CatalogResource {
                 .build();
     }
 
-    private Item writableFolder(Tree tree, UUID id) {
+    static Item writableFolder(Tree tree, UUID id) {
         Item folder = tree.readableFolder(id).orElseThrow(CatalogResource::notFound);
         if (!Levels.atLeast(tree.level(folder), Levels.EDIT)) {
             throw problem(Response.Status.FORBIDDEN, "You can only read this folder.");
@@ -289,22 +293,46 @@ public class CatalogResource {
 
     /** Whether the person is a member or an administrator of the organization, not a guest. */
     private boolean member() {
+        return member(identity);
+    }
+
+    static boolean member(SecurityIdentity identity) {
         return identity.hasRole("organization-user") || identity.hasRole("organization-admin");
     }
 
-    private static void checkFree(String name, List<Item> siblings) {
+    /**
+     * Refuses a name that an item of the folder already has, in any case, with a conflict that names
+     * that item (EXT-002); the item itself, renamed, does not count.
+     */
+    static void checkFree(String name, List<Item> siblings) {
+        checkFree(name, siblings, null);
+    }
+
+    static void checkFree(String name, List<Item> siblings, UUID itself) {
         siblings.stream()
-                .filter(item -> ItemName.same(item.getName(), name))
+                .filter(item -> !item.getId().equals(itself) && ItemName.same(item.getName(), name))
                 .findFirst()
                 .ifPresent(existing -> {
-                    throw problem(
-                            Response.Status.CONFLICT,
-                            "This folder already holds " + (existing.isFolder() ? "a folder" : "a file") + " named "
-                                    + existing.getName() + ".");
+                    throw new WebApplicationException(taken(existing));
                 });
     }
 
-    private static String name(String name) {
+    /** The conflict of a name already used: its detail and its member {@code existing} name the item. */
+    static Response taken(Item existing) {
+        Response.Status status = Response.Status.CONFLICT;
+        return Response.status(status)
+                .type("application/problem+json")
+                .entity(Map.of(
+                        "status", status.getStatusCode(),
+                        "title", status.getReasonPhrase(),
+                        "detail", "This folder already holds " + (existing.isFolder() ? "a folder" : "a file")
+                                + " named " + existing.getName() + ".",
+                        "existing", Map.of(
+                                "id", existing.getId(), "kind", existing.getKind(), "name", existing.getName())))
+                .build();
+    }
+
+    static String name(String name) {
         try {
             return ItemName.check(name);
         } catch (IllegalArgumentException e) {
@@ -326,11 +354,11 @@ public class CatalogResource {
     }
 
     /** The same answer for a folder that does not exist and for one the person cannot read. */
-    private static NotFoundException notFound() {
+    static NotFoundException notFound() {
         return new NotFoundException();
     }
 
-    private static WebApplicationException problem(Response.Status status, String detail) {
+    static WebApplicationException problem(Response.Status status, String detail) {
         return new WebApplicationException(Response.status(status)
                 .type("application/problem+json")
                 .entity(Map.of("status", status.getStatusCode(), "title", status.getReasonPhrase(), "detail", detail))
