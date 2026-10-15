@@ -50,6 +50,17 @@ public class Item {
     @Column(name = "content_type")
     private String contentType;
 
+    /** The kind of a file that another extension recognized, {@code <extension>/<name>} (EXT-105). */
+    @Column(name = "file_kind")
+    private String fileKind;
+
+    /** The state its kind recorded on the file, such as {@code loaded}. */
+    @Column(name = "kind_state")
+    private String kindState;
+
+    @Column(name = "kind_state_detail")
+    private String kindStateDetail;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -106,6 +117,35 @@ public class Item {
         this.parentId = newParentId;
     }
 
+    /**
+     * Replaces the content of a file (EXT-105): the file service keeps the new one under {@code fileId}.
+     * It changes now.
+     */
+    public void replaceContent(UUID newFileId, long newSize, String newContentType, Instant now) {
+        this.fileId = Objects.requireNonNull(newFileId, "newFileId");
+        this.size = newSize;
+        this.contentType = newContentType;
+        this.changedAt = Objects.requireNonNull(now, "now").truncatedTo(ChronoUnit.MICROS);
+    }
+
+    /**
+     * Gives the file the kind that recognized it, {@code null} for none (EXT-105); a state recorded by
+     * another kind goes.
+     */
+    public void recognizedAs(String kind) {
+        if (!Objects.equals(kind, fileKind)) {
+            this.kindState = null;
+            this.kindStateDetail = null;
+        }
+        this.fileKind = kind;
+    }
+
+    /** Records the state of its kind on the file, {@code null} for none (EXT-105). */
+    public void recordState(String state, String detail) {
+        this.kindState = fileKind == null ? null : state;
+        this.kindStateDetail = kindState == null ? null : detail;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -141,6 +181,19 @@ public class Item {
 
     public String getContentType() {
         return contentType;
+    }
+
+    /** The kind of a file, {@code <extension>/<name>}; {@code null} for none (EXT-105). */
+    public String getFileKind() {
+        return fileKind;
+    }
+
+    public String getKindState() {
+        return kindState;
+    }
+
+    public String getKindStateDetail() {
+        return kindStateDetail;
     }
 
     public Instant getCreatedAt() {

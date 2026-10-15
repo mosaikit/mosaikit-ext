@@ -13,12 +13,14 @@ one `EXT-nnn.md` each, and its changes in [`CHANGELOG.md`](CHANGELOG.md).
 |---|---|
 | `manifest.yaml` | identity, backend, schema, resource types, frontend and contributions of the extension |
 | `src/main/java/` | the backend: the REST API under `/api/v1/ext/catalog` and the tree of folders and files |
-| `db/` | the migrations of the schema `ext_catalog`: the tree (`V1`), downloads and pending removals (`V2`) |
+| `db/` | the migrations of the schema `ext_catalog`: the tree (`V1`), downloads and pending removals (`V2`), kinds of files (`V3`) |
+| `api/` | `io.github.mosaikit.ext:ext-catalog-api`, the contracts that other extensions implement (EXT-105): a library of the catalog and of those extensions |
 | `web/index.js` | the app, a custom element the shell renders at `/app/catalog`; `web/drop.js` reads what is dropped or chosen, `web/zip.js` writes the archive of a download |
 | `web/i18n.js` | the texts of the app in English and Italian, chosen by `context.locale` |
 | `pom.xml` | the build, on the parent of Mosaikit extensions `io.github.mosaikit:mosaikit-extension-parent` |
 | `src/test/java/` | the unit tests of the backend |
 | `package.json`, `playwright.config.ts`, `tests/` | the bench of `@mosaikit/testing` and the Playwright tests |
+| `tests/fixtures/text-notes/` | an extension that adds the kind "text note" through the contract, installed with the catalog by the tests |
 | `docs/requirements/` | the requirements of this extension |
 
 ## Folders and files
@@ -52,6 +54,11 @@ does not exist.
 | `DELETE /api/v1/ext/catalog/items/{id}` | deletes the item and everything it holds, with the level edit, from the catalog and from the file service |
 | `POST /api/v1/ext/catalog/downloads` | `{ "items", "name"?, "validFor"? }`: one file, or the entries of an archive (`path`, and `url` for a file), each with a signed link of the kernel valid `validFor` seconds (300 unless given, at most 3600); `200` when ready, `202` while a job makes the links |
 | `GET /api/v1/ext/catalog/downloads/{id}` | a download of the person, `pending` until its links are made, then `ready` |
+| `PUT /api/v1/ext/catalog/items/{id}/content` | replaces the content of a file with the body and its `Content-Type`, with the level edit on the file itself; the file keeps its identifier, name, folder and shares |
+
+A file in a list also has its `contentType` and `fileKind`: `{ "extension", "name", "state",
+"stateDetail" }` when an extension active in the organization recognized it (EXT-105), `null`
+otherwise.
 
 ## Upload, download, move, rename, delete
 
@@ -137,11 +144,107 @@ job of the organization after its own check (see Storage); search still refuses 
 The dialog also makes links, which the access lists with their expiry; the catalog does not yet
 contribute the page that shows a folder or a file opened through a link (`shared.view`).
 
+## Kinds of files
+
+Other extensions add kinds of files to the file manager (EXT-105), such as a table, an image or a
+dataset that a product understands, through the contract `io.github.mosaikit.ext.catalog/file-kind`
+version 1 (MK-134). The files stay plain files of the organization, with their content in the file
+service of the kernel: without the extension, the catalog shows them as any other file, and when it
+comes back they are of its kind again.
+
+**On the server.** The extension depends on `io.github.mosaikit.ext:ext-catalog-api` (built from
+[`api/`](api/)), which its build copies into its `lib/` and lists among its libraries, declares the
+contract in its manifest, and implements `io.github.mosaikit.ext.catalog.api.v1.FileKind` in an
+`@ApplicationScoped` bean, one per kind:
+
+```yaml
+optional:
+  io.github.mosaikit.ext.catalog: '>=0.1 <1'
+contracts:
+  implements:
+    - contract: io.github.mosaikit.ext.catalog/file-kind
+      version: 1
+      api: io.github.mosaikit.ext:ext-catalog-api
+```
+
+```java
+@ApplicationScoped
+public class DatasetKind implements FileKind {
+    public String extension() { return "org.example.datasets"; }
+    public String name() { return "dataset"; }            // known as org.example.datasets/dataset
+
+    public boolean recognizes(FileSample sample) {          // name, media type, first 4096 bytes
+        return sample.extension().equals("csv") || sample.isOfType("text/csv");
+    }
+
+    public void changed(FileEvent event) {                  // in a job of the organization
+        if (event.change() == Change.STORED || event.change() == Change.REPLACED) {
+            try (InputStream content = event.file().open()) {
+                load(event.file().id(), content);
+                event.file().record(FileState.of("loaded"));
+            } catch (IOException | RuntimeException e) {
+                event.file().record(FileState.of("failed", e.getMessage()));
+            }
+        } else if (event.change() == Change.DELETED) {
+            unload(event.file().id());
+        }
+    }
+}
+```
+
+- **Recognized.** When a person stores a file, or replaces its content, the catalog asks the kinds of
+  the extensions active in the organization, in the order of the extensions; the first that
+  recognizes it is its kind, kept on the file. When an extension becomes active in an organization
+  (installed, installed again, updated or turned on), its kinds look at the files that no kind
+  recognized yet. A kind that fails counts as one that does not recognize the file.
+- **Told.** The kind is told, in a job of the organization a few seconds after the change commits,
+  at least once (MK-085), when its file is `STORED`, `REPLACED`, `RENAMED`, `MOVED` (alone or with a
+  folder above it), `DELETED` (also when a new content is no longer of its kind), `SHARING_CHANGED`
+  (a share of it or of a folder above it granted, changed or revoked), and `RECOGNIZED` when its
+  extension becomes active, for the files it recognizes then and those it knew. `event.file()` gives
+  the file, its folder and path, and `open()` reads its content through the catalog, since the file
+  service of the kernel keeps it under the catalog; `event.details()` says more, such as the previous
+  name or folder, or the share. An exception makes the catalog tell it again later.
+- **State.** `record(FileState.of("loaded"))`, or `FileState.of("failed", "why")`, keeps a state on
+  the file, which the catalog shows in the list and in its detail. For work that ends after the event,
+  or for a request of the extension, the bean `CatalogFiles` of the catalog finds a file of its kinds
+  (`Instance<CatalogFiles>`, since the catalog may be absent), with the same `open()` and `record()`.
+
+**In the frontend.** The extension contributes its icon, preview, states and actions to the point
+`catalog.file-kind` (version 1, whose JSON Schema is in [`manifest.yaml`](manifest.yaml)):
+
+```yaml
+contributes:
+  catalog.file-kind:
+    - id: dataset
+      kind: dataset                      # FileKind.name()
+      title: Dataset
+      icon: web/dataset.svg              # an image of the package of the extension
+      preview: example-dataset-preview   # a custom element of its frontend
+      states: { loaded: Loaded, failed: Failed }
+      actions:
+        - { id: publish, title: Publish, element: example-dataset-publish }
+      i18n:
+        it: { title: Insieme di dati, state.loaded: Caricato, state.failed: Non caricato, action.publish: Pubblica }
+```
+
+A file of the kind shows the icon, the title and the state in the list, with its actions; *Details*
+shows what it is, its state with its detail, the preview element and the actions. The preview and
+each action are custom elements of the extension, which the catalog creates with the property
+`file`: `{ id, name, contentType, size, fileKind, url() }`, `url()` resolving to a signed, expiring
+link to its content (EXT-004). An action opens in a dialog; when it changed the file, it dispatches
+`catalog-file-changed` (bubbling, composed), and the catalog shows the file again.
+
+[`tests/fixtures/text-notes`](tests/fixtures/text-notes) is a complete example, which the tests
+install with the catalog.
+
 ## Build and test
 
 Java 25, Maven and Node.js 24, from this folder:
 
 ```bash
+mvn -f api install                       # the API of the contracts of the catalog, first (EXT-105)
+mvn -f tests/fixtures/text-notes package # the fixture of the tests of the kinds of files
 mvn package    # target/ext-catalog-0.1.0.zip, the package to install
 mvn verify     # also the tests of tests/, on a Mosaikit installation started for them
 npm test       # the same tests, after mvn package
@@ -166,3 +269,6 @@ mvn -q install:install-file -Dfile=mosaikit-kernel-api-$v.jar -DpomFile=mosaikit
 
 The CI does the same with the action `mosaikit/.github/actions/kernel-api`.
 `MOSAIKIT_INSTALLATION=<mosaikit>/target/dist/mosaikit` tests against a build of Mosaikit.
+The kinds of files (EXT-105) need the contracts between extensions of Mosaikit (MK-134): until they
+are in its snapshot, build Mosaikit from the branch that brings them and test with
+`MOSAIKIT_INSTALLATION` and its packed `@mosaikit/testing`.

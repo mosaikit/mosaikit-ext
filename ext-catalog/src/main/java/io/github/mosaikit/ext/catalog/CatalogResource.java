@@ -10,6 +10,8 @@ import dev.mosaikit.kernel.api.resource.ResourceRef;
 import dev.mosaikit.kernel.api.resource.Resources;
 import dev.mosaikit.kernel.api.sharing.Sharing;
 import dev.mosaikit.kernel.api.teams.People;
+import io.github.mosaikit.ext.catalog.api.v1.FileEvent;
+import io.github.mosaikit.ext.catalog.api.v1.FileSample;
 import io.quarkus.security.Authenticated;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.transaction.Transactional;
@@ -67,6 +69,9 @@ public class CatalogResource {
      * @param changed when it last changed
      * @param sharing who reaches it besides its owner and the administrators
      * @param level the level of the person on it: read, edit or manage
+     * @param contentType the media type of a file, {@code null} for a folder
+     * @param fileKind the kind of a file that another extension recognized, while that extension is
+     *     active in the organization (EXT-105); {@code null} otherwise
      */
     public record ItemView(
             UUID id,
@@ -77,7 +82,26 @@ public class CatalogResource {
             Owner owner,
             Instant changed,
             SharingState sharing,
-            String level) {}
+            String level,
+            String contentType,
+            FileKindView fileKind) {}
+
+    /**
+     * The kind of a file (EXT-105): the extension that recognized it, the name of the kind in it, and the
+     * state the kind recorded on the file, with its detail.
+     */
+    public record FileKindView(String extension, String name, String state, String stateDetail) {
+
+        static FileKindView of(Item item, Set<String> active) {
+            String kind = item.getFileKind();
+            if (kind == null || !active.contains(kind)) {
+                return null;
+            }
+            String extension = FileKinds.extensionOf(kind);
+            return new FileKindView(
+                    extension, kind.substring(extension.length() + 1), item.getKindState(), item.getKindStateDetail());
+        }
+    }
 
     /** A step of the breadcrumbs. */
     public record Step(UUID id, String name) {}
@@ -100,6 +124,8 @@ public class CatalogResource {
     private final Sharing sharing;
     private final People people;
     private final FileStorage files;
+    private final FileKinds kinds;
+    private final FileKindEvents kindEvents;
     private final SecurityIdentity identity;
 
     public CatalogResource(
@@ -109,6 +135,8 @@ public class CatalogResource {
             Sharing sharing,
             People people,
             FileStorage files,
+            FileKinds kinds,
+            FileKindEvents kindEvents,
             SecurityIdentity identity) {
         this.items = items;
         this.organization = organization;
@@ -116,6 +144,8 @@ public class CatalogResource {
         this.sharing = sharing;
         this.people = people;
         this.files = files;
+        this.kinds = kinds;
+        this.kindEvents = kindEvents;
         this.identity = identity;
     }
 
@@ -203,7 +233,9 @@ public class CatalogResource {
 
     /**
      * Stores a file in a folder where the person has the level edit, with the content of the body,
-     * through the file service of the kernel (MK-041). The person owns it.
+     * through the file service of the kernel (MK-041). The person owns it. The kinds of files of the
+     * extensions active in the organization look at its name, type and first bytes, and the first that
+     * recognizes it is told that it was stored (EXT-105).
      */
     @POST
     @Path("folders/{id}/files")
@@ -222,9 +254,10 @@ public class CatalogResource {
         UUID itemId = UUID.randomUUID();
         ResourceRef ref = Tree.ref(Item.FILE, itemId);
         resources.register(ref, new Resources.Details(name, link(folder.getId()), Tree.ref(folder)));
+        FileKinds.Head head = FileKinds.head(content);
         StoredFile stored;
         try {
-            stored = files.store(EXTENSION, FileStorage.NewFile.of(name, type).attachedTo(ref), content);
+            stored = files.store(EXTENSION, FileStorage.NewFile.of(name, type).attachedTo(ref), head.content());
         } catch (IllegalArgumentException e) {
             throw problem(Response.Status.BAD_REQUEST, e.getMessage());
         } catch (IllegalStateException e) {
@@ -234,7 +267,10 @@ public class CatalogResource {
         }
         Item created = Item.file(
                 itemId, organization.require(), folder.getId(), name, stored.id(), stored.size(), type, Instant.now());
+        created.recognizedAs(FileKinds.recognize(new FileSample(name, type, stored.size(), head.bytes()), kinds.active())
+                .orElse(null));
         items.insert(created);
+        kindEvents.raise(created, FileEvent.Change.STORED, Map.of());
         return Response.status(Response.Status.CREATED)
                 .entity(views(new Tree(items, sharing), List.of(created), Listing.order(null, null)).getFirst())
                 .build();
@@ -248,13 +284,16 @@ public class CatalogResource {
         return folder;
     }
 
-    private List<ItemView> views(Tree tree, List<Item> list, Comparator<Item> comparator) {
+    List<ItemView> views(Tree tree, List<Item> list, Comparator<Item> comparator) {
         List<UUID> folders = list.stream().filter(Item::isFolder).map(Item::getId).toList();
         Map<UUID, Long> counts = folders.isEmpty()
                 ? Map.of()
                 : items.parentsOfChildren(folders).stream()
                         .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
         Map<UUID, Optional<Owner>> owners = new HashMap<>();
+        Set<String> active = list.stream().anyMatch(item -> item.getFileKind() != null)
+                ? kinds.active().stream().map(FileKinds::id).collect(Collectors.toSet())
+                : Set.of();
         return list.stream()
                 .sorted(comparator)
                 .map(item -> new ItemView(
@@ -266,7 +305,9 @@ public class CatalogResource {
                         owner(item, owners),
                         item.getChangedAt(),
                         tree.sharingState(item),
-                        tree.level(item)))
+                        tree.level(item),
+                        item.getContentType(),
+                        FileKindView.of(item, active)))
                 .toList();
     }
 

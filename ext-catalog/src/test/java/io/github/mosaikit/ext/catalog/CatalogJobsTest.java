@@ -66,6 +66,7 @@ class CatalogJobsTest {
                 java.util.Set.of(
                         "io.github.mosaikit.ext.catalog:download.requested",
                         "io.github.mosaikit.ext.catalog:removal.requested",
+                        "io.github.mosaikit.ext.catalog:content.discarded",
                         PlatformEvents.ORGANIZATION_DELETED),
                 jobs.types());
     }
@@ -246,6 +247,11 @@ class CatalogJobsTest {
         @Override
         public List<Item> all() {
             return List.copyOf(rows.values());
+        }
+
+        @Override
+        public List<Item> files() {
+            return rows.values().stream().filter(item -> !item.isFolder()).toList();
         }
 
         @Override

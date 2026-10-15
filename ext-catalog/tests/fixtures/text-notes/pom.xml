@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 Massimo Antonini
+  SPDX-License-Identifier: MPL-2.0
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <!--
+      A fixture of the tests of the catalog (EXT-105): an extension that adds the kind "text note" to the
+      file manager through the contract file-kind of the catalog, as an extension of a product would.
+      It brings the API of the catalog as a library, never its classes.
+
+        mvn -f ../../../api install    the API of the catalog, first
+        mvn package                    target/fixture-text-notes-0.1.0.zip, which the tests install
+    -->
+    <parent>
+        <groupId>io.github.mosaikit</groupId>
+        <artifactId>mosaikit-extension-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath/>
+    </parent>
+    <groupId>org.example</groupId>
+    <artifactId>fixture-text-notes</artifactId>
+    <version>0.1.0</version>
+    <name>Text notes (fixture)</name>
+    <description>A kind of files of the catalog for its tests: text notes, with a preview and an action.</description>
+    <properties>
+        <!-- The fixture is installed by the tests of the catalog, which build its package. -->
+        <skip.npm>true</skip.npm>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>io.github.mosaikit</groupId>
+            <artifactId>mosaikit-kernel-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.mosaikit.ext</groupId>
+            <artifactId>ext-catalog-api</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-jackson</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-hibernate-orm</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-security</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+</project>

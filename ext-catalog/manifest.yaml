@@ -9,6 +9,13 @@ platform: '>=0.1 <1'
 backend:
   jar: lib/ext-catalog.jar
   api: catalog
+# Kinds of files that other extensions add to the file manager (EXT-105), through the contract
+# file-kind of the catalog (MK-134), whose interfaces are in the library ext-catalog-api.
+contracts:
+  provides:
+    - name: file-kind
+      versions: [1]
+      api: io.github.mosaikit.ext:ext-catalog-api
 database:
   # The tree of folders and files and their metadata; the content of files goes to the file service
   # of the kernel (MK-041).
@@ -39,6 +46,47 @@ frontend:
   # Used when the shell isolates the frontend in an iframe (MK-014).
   bridge:
     services: [api]
+  # The icon, preview, states and actions of the kinds of files of other extensions (EXT-105): a
+  # contribution names a kind of its extension (FileKind.name() on the server); the catalog shows them
+  # for the files of that kind while the extension is active.
+  points:
+    - name: catalog.file-kind
+      version: 1
+      schema:
+        type: object
+        required: [kind]
+        additionalProperties: false
+        properties:
+          kind:
+            type: string
+            minLength: 1
+            maxLength: 64
+            description: 'The name of the kind in the extension, as FileKind.name() on the server'
+          title: {type: string, maxLength: 80, description: 'What files of the kind are, such as Text note'}
+          icon: {type: string, maxLength: 255, description: 'An image of the extension, such as web/note.svg'}
+          preview:
+            type: string
+            maxLength: 100
+            description: 'A custom element that shows a file of the kind, given the file in its property file'
+          states:
+            type: object
+            description: 'The title of each state the kind records, by state; translated in i18n as state.<state>'
+          actions:
+            type: array
+            maxItems: 8
+            description: 'What can be done with a file of the kind; titles translated in i18n as action.<id>'
+            items:
+              type: object
+              required: [id, title, element]
+              additionalProperties: false
+              properties:
+                id: {type: string, minLength: 1, maxLength: 64}
+                title: {type: string, minLength: 1, maxLength: 80}
+                element:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: 'A custom element shown in a dialog, given the file in its property file'
 contributes:
   # The app bar of the shell (MK-025); the texts in other languages are in i18n (MK-053).
   rail.app:
@@ -50,3 +98,8 @@ contributes:
       order: 40
       i18n:
         it: { title: Catalogo }
+libraries:
+  # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
+  - jar: 'lib/ext-catalog-api-1.0.0.jar'
+    coordinates: 'io.github.mosaikit.ext:ext-catalog-api:1.0.0'
+    sha256: 'f77a5b5ddc0219e34bad05a06226d7f02f443cba1f9ae1c36113785962565f0c'

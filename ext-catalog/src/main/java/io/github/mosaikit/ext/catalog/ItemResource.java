@@ -7,18 +7,24 @@ import dev.mosaikit.kernel.api.files.FileStorage;
 import dev.mosaikit.kernel.api.resource.ResourceRef;
 import dev.mosaikit.kernel.api.resource.Resources;
 import dev.mosaikit.kernel.api.sharing.Sharing;
+import dev.mosaikit.kernel.api.files.StoredFile;
+import io.github.mosaikit.ext.catalog.api.v1.FileEvent.Change;
+import io.github.mosaikit.ext.catalog.api.v1.FileSample;
 import io.quarkus.security.Authenticated;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.io.InputStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,12 +57,17 @@ public class ItemResource {
     /** The event that asks a job to delete the content of files the person could not delete themselves. */
     static final String REMOVAL_REQUESTED = "removal.requested";
 
+    /** The event that asks a job to delete a content replaced by another one (EXT-105). */
+    static final String CONTENT_DISCARDED = "content.discarded";
+
     private final Items items;
     private final PendingRemovals removals;
     private final Resources resources;
     private final Sharing sharing;
     private final FileStorage files;
     private final PlatformEvents events;
+    private final FileKinds kinds;
+    private final FileKindEvents kindEvents;
     private final SecurityIdentity identity;
 
     public ItemResource(
@@ -66,6 +77,8 @@ public class ItemResource {
             Sharing sharing,
             FileStorage files,
             PlatformEvents events,
+            FileKinds kinds,
+            FileKindEvents kindEvents,
             SecurityIdentity identity) {
         this.items = items;
         this.removals = removals;
@@ -73,6 +86,8 @@ public class ItemResource {
         this.sharing = sharing;
         this.files = files;
         this.events = events;
+        this.kinds = kinds;
+        this.kindEvents = kindEvents;
         this.identity = identity;
     }
 
@@ -104,9 +119,13 @@ public class ItemResource {
         Tree tree = new Tree(items, sharing);
         Item item = editable(tree, id);
         CatalogResource.checkFree(name, siblings(tree, item.getParentId()), item.getId());
+        String previous = item.getName();
         item.rename(name, Instant.now());
         items.update(item);
         register(tree, item);
+        if (!previous.equals(item.getName())) {
+            kindEvents.raise(item, Change.RENAMED, Map.of("previousName", previous));
+        }
         return Response.noContent().build();
     }
 
@@ -141,9 +160,12 @@ public class ItemResource {
             return Response.noContent().build();
         }
         CatalogResource.checkFree(item.getName(), siblings(tree, target), item.getId());
+        UUID previous = item.getParentId();
         item.moveTo(target);
         items.update(item);
         register(tree, item);
+        kindEvents.raise(item, Change.MOVED, Map.of("previousFolder", previous == null ? "" : previous.toString()));
+        kindEvents.raiseForFiles(tree.contents(item), Change.MOVED, Map.of("movedWith", item.getId().toString()));
         return Response.noContent().build();
     }
 
@@ -165,6 +187,8 @@ public class ItemResource {
         gone = new ArrayList<>(gone.reversed());
         gone.add(item);
         boolean pending = false;
+        // The kinds are told before the folders above their files go, while their path is still known.
+        kindEvents.raiseForFiles(gone, Change.DELETED, Map.of());
         for (Item each : gone) {
             ResourceRef ref = Tree.ref(each);
             if (each.isFolder() || deleteContent(each, ref)) {
@@ -179,6 +203,68 @@ public class ItemResource {
             events.raise(CatalogResource.EXTENSION, REMOVAL_REQUESTED, Map.of("item", item.getId().toString()));
         }
         return Response.noContent().build();
+    }
+
+    /**
+     * Replaces the content of a file with the body, with its {@code Content-Type}, keeping the file, its
+     * name, its folder and its shares (EXT-105). The kinds of files look at it again: the kind of the file
+     * is told that it was replaced, or, when another kind (or none) recognizes it now, that it is no
+     * longer of its kind, and the new kind that it was stored. The kernel lets a person store a content of
+     * a file with a level of their own on it (MK-055): one who edits it only through a folder above it is
+     * refused with 403.
+     */
+    @PUT
+    @Path("{id}/content")
+    @Consumes(MediaType.WILDCARD)
+    @Transactional
+    public Response replace(
+            @PathParam("id") UUID id, @HeaderParam("Content-Type") String contentType, InputStream content) {
+        Tree tree = new Tree(items, sharing);
+        Item item = editable(tree, id);
+        if (item.isFolder()) {
+            throw CatalogResource.problem(Response.Status.BAD_REQUEST, "A folder has no content to replace.");
+        }
+        String type = contentType == null || contentType.isBlank() ? MediaType.APPLICATION_OCTET_STREAM : contentType;
+        FileKinds.Head head = FileKinds.head(content);
+        StoredFile stored;
+        try {
+            stored = files.store(
+                    CatalogResource.EXTENSION,
+                    FileStorage.NewFile.of(item.getName(), type).attachedTo(Tree.ref(item)),
+                    head.content());
+        } catch (IllegalArgumentException e) {
+            throw CatalogResource.problem(Response.Status.BAD_REQUEST, e.getMessage());
+        } catch (SecurityException e) {
+            throw CatalogResource.problem(
+                    Response.Status.FORBIDDEN, "Only who holds a level on the file itself replaces its content.");
+        } catch (IllegalStateException e) {
+            throw CatalogResource.problem(Response.Status.FORBIDDEN, e.getMessage());
+        }
+        UUID previousContent = item.getFileId();
+        String previousKind = item.getFileKind();
+        String kind = FileKinds.recognize(
+                        new FileSample(item.getName(), type, stored.size(), head.bytes()), kinds.active())
+                .orElse(null);
+        if (previousKind != null && !previousKind.equals(kind)) {
+            kindEvents.raise(item, previousKind, Change.DELETED, Map.of("replaced", "true"));
+        }
+        item.replaceContent(stored.id(), stored.size(), type, Instant.now());
+        item.recognizedAs(kind);
+        items.update(item);
+        if (kind != null) {
+            kindEvents.raise(item, kind.equals(previousKind) ? Change.REPLACED : Change.STORED, Map.of());
+        }
+        discard(previousContent);
+        return Response.noContent().build();
+    }
+
+    /** Deletes a content that a file no longer has: as the person, or else in a job of the organization. */
+    private void discard(UUID content) {
+        try {
+            files.delete(CatalogResource.EXTENSION, content);
+        } catch (NoSuchElementException | SecurityException e) {
+            events.raise(CatalogResource.EXTENSION, CONTENT_DISCARDED, Map.of("file", content.toString()));
+        }
     }
 
     /** Deletes the content of a file as the person, when the kernel lets them; whether it did. */

@@ -29,6 +29,8 @@ import java.util.UUID;
  *       the person before it asked.
  *   <li>{@code removal.requested}: deletes the content of files deleted from the catalog that the person
  *       could not delete in the file service themselves, then removes their resources.
+ *   <li>{@code content.discarded}: deletes a content that a file no longer has, replaced by another one
+ *       (EXT-105), which the person could not delete themselves.
  *   <li>{@code organization.deleted}: deletes the content of every file of the organization from the
  *       storage, and its folders and files.
  * </ul>
@@ -70,6 +72,7 @@ public class CatalogJobs implements PlatformEventSubscriber {
         return Set.of(
                 own(DownloadResource.DOWNLOAD_REQUESTED),
                 own(ItemResource.REMOVAL_REQUESTED),
+                own(ItemResource.CONTENT_DISCARDED),
                 PlatformEvents.ORGANIZATION_DELETED);
     }
 
@@ -80,6 +83,8 @@ public class CatalogJobs implements PlatformEventSubscriber {
             sign(UUID.fromString(event.text("download")));
         } else if (type.equals(own(ItemResource.REMOVAL_REQUESTED))) {
             removePending();
+        } else if (type.equals(own(ItemResource.CONTENT_DISCARDED))) {
+            deleteContent(UUID.fromString(event.text("file")));
         } else if (type.equals(PlatformEvents.ORGANIZATION_DELETED)) {
             release();
         }

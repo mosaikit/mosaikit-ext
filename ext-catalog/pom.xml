@@ -39,6 +39,14 @@
             <groupId>io.github.mosaikit</groupId>
             <artifactId>mosaikit-kernel-api</artifactId>
         </dependency>
+        <!-- The contracts of the catalog that other extensions implement (EXT-105, MK-134): a library of
+             the extension, built from api/ (mvn -f api install), which the kernel loads once for the
+             catalog and the extensions of its contracts. -->
+        <dependency>
+            <groupId>io.github.mosaikit.ext</groupId>
+            <artifactId>ext-catalog-api</artifactId>
+            <version>1.0.0</version>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-rest-jackson</artifactId>
