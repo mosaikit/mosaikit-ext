@@ -4,11 +4,28 @@ id: io.github.mosaikit.ext.catalog.connection
 version: 0.1.0
 name: Connections
 description: The framework of connections to data sources, with their list, creation, detail, picker and credentials.
-kind: [app]
+kind: [app, service]
 platform: '>=0.1 <1'
+backend:
+  jar: lib/ext-catalog-connection.jar
+  api: connections
+database:
+  # The connections of each organization; their credentials are in the secrets service of the kernel
+  # (MK-062), here only the name of each.
+  schema: ext_catalog_connection
+# Each kind of source is a connector, an extension of its own that implements this contract (EXT-010,
+# MK-134) with the interfaces of the library ext-catalog-connection-api.
+contracts:
+  provides:
+    - name: connector
+      versions: [1]
+      api: io.github.mosaikit.ext:ext-catalog-connection-api
 frontend:
   entry: web/index.js
   isolation: module
+  # Used when the shell isolates the frontend in an iframe (MK-014).
+  bridge:
+    services: [api]
 contributes:
   # The app bar of the shell (MK-025); the texts in other languages are in i18n (MK-053).
   rail.app:
@@ -20,3 +37,8 @@ contributes:
       order: 41
       i18n:
         it: { title: Connessioni }
+libraries:
+  # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
+  - jar: 'lib/ext-catalog-connection-api-0.1.0.jar'
+    coordinates: 'io.github.mosaikit.ext:ext-catalog-connection-api:0.1.0'
+    sha256: 'ca2d3f0e5c2d60c417dc56bf1a1ae96a314e0a2466d8d7ca0bac681d56c698e2'

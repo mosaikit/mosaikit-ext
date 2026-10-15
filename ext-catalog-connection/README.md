@@ -11,19 +11,84 @@ one `EXT-nnn.md` each, and its changes in [`CHANGELOG.md`](CHANGELOG.md).
 
 | Path | Content |
 |---|---|
-| `manifest.yaml` | identity, frontend and contributions of the extension |
+| `manifest.yaml` | identity, backend, database, the contract it provides, frontend and contributions of the extension |
+| `api/` | `io.github.mosaikit.ext:ext-catalog-connection-api`, the contract that connectors implement (EXT-010) |
+| `src/main/java/` | the backend: the connectors found through the contract, the connections, `/api/v1/ext/connections` |
+| `db/` | the migrations of the schema `ext_catalog_connection` |
 | `web/index.js` | the app, a custom element the shell renders at `/app/connections` |
 | `web/i18n.js` | the texts of the app in English and Italian, chosen by `context.locale` |
 | `pom.xml` | the build, on the parent of Mosaikit extensions `io.github.mosaikit:mosaikit-extension-parent` |
 | `package.json`, `playwright.config.ts`, `tests/` | the bench of `@mosaikit/testing` and the Playwright tests |
+| `tests/fixtures/` | two connectors of the tests, built with the framework: a sample source, and one whose declaration lacks a field |
 | `docs/requirements/` | the requirements of this extension |
+
+## Connectors
+
+The framework knows no protocol. Each kind of source is a connector, an extension of its own
+(`ext-catalog-connection-<source>`, or one of a product), which implements the contract `connector` of
+the framework (MK-134 of Mosaikit) in a CDI bean: `Connector` of
+`io.github.mosaikit.ext.catalog.connection.api.v1`, in the artifact
+`io.github.mosaikit.ext:ext-catalog-connection-api`, a dependency of the connector that its build
+copies into `lib/` as a library. The framework finds the connectors active in the organization each
+time it needs them: installing a connector adds its type to New connection, without any change to the
+framework.
+
+```java
+@ApplicationScoped
+public class FilesConnector implements Connector {
+    public String extension() { return "org.example.ext.catalog.connection.files"; }
+
+    public Declaration declaration() {
+        return new Declaration("files", "Files", Map.of("it", "File"), "files", "web/logo.svg", Map.of(
+                "type", "object",
+                "required", List.of("root"),
+                "properties", Map.of("root", Map.of("type", "string", "title", "Root folder"))));
+    }
+
+    public TestResult test(ConnectionSettings settings) { ... }
+    public Page<Entry> list(ConnectionSettings settings, String path, Paging paging) { ... }
+}
+```
+
+```yaml
+# manifest.yaml of the connector
+backend:
+  jar: lib/ext-catalog-connection-files.jar
+  api: catalog-connection-files          # required with Java code
+contracts:
+  implements:
+    - contract: io.github.mosaikit.ext.catalog.connection/connector
+      version: 1
+      api: io.github.mosaikit.ext:ext-catalog-connection-api
+```
+
+- **The declaration**: the type (unique, kept with each connection), its title in English and in other
+  languages, its category (`database`, `warehouse`, `lake`, `api`, `stream`, `files`, or one of its
+  own), its logo (an SVG or PNG image of the package of the connector, served by the kernel) and the
+  connection form, a JSON Schema of the settings of a connection (strings, numbers, integers and
+  booleans, with titles, defaults and choices). The framework checks it at start and whenever it
+  lists the connectors: a declaration that lacks a field, or has a wrong one, is refused with a
+  problem naming the field, in the log of the installation, in `GET /api/v1/ext/connections/connectors`
+  and in the app; the other connectors keep working.
+- **Credentials**: a connection names a credential that the administrators keep in Credentials (the
+  secrets service of the platform); the framework reads it at the moment of a call and passes it in
+  `ConnectionSettings`. The connector never keeps it, logs it or returns it, and no answer of the API
+  of the framework contains it.
+- **Removed or turned off**: the connections of a connector that is no longer active stay listed,
+  unavailable, with the placeholder of the platform (MK-135), and work again when it comes back.
+- **Versions**: version 1 of the contract is the package `api.v1`. A breaking change is a new package
+  `api.v2` with `version = 2` next to it, served together (`versions: [1, 2]` in the manifest of the
+  framework) until version 1 is retired.
+
+`tests/fixtures/sample` is a complete small connector.
 
 ## Build and test
 
 Java 25, Maven and Node.js 24, from this folder:
 
 ```bash
-mvn package    # target/ext-catalog-connection-0.1.0.zip, the package to install
+mvn -f api/pom.xml install   # the API of the connectors, once and after each change of api/
+mvn package    # target/ext-catalog-connection-0.1.0.zip, the package to install, and the connectors of the tests
 mvn verify     # also the tests of tests/, on a Mosaikit installation started for them
 npm test       # the same tests, after mvn package
 npm run dev    # Mosaikit with this extension, until Ctrl+C
@@ -45,5 +110,7 @@ mvn -q install:install-file -Dfile=mosaikit-extension-parent-$v.pom -DpomFile=mo
 mvn -q install:install-file -Dfile=mosaikit-kernel-api-$v.jar -DpomFile=mosaikit-kernel-api-$v.pom
 ```
 
-The CI does the same with the action `mosaikit/.github/actions/kernel-api`.
+The CI does the same with the action `mosaikit/.github/actions/kernel-api`. Maven resolves the
+dependencies of a project before any plugin of its build runs, so the API of the connectors is
+installed apart, before the framework is built.
 `MOSAIKIT_INSTALLATION=<mosaikit>/target/dist/mosaikit` tests against a build of Mosaikit.
