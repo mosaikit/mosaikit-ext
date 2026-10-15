@@ -29,6 +29,10 @@ and the versions [Semantic Versioning](https://semver.org/).
   selection box counted in the header, the pieces at the top level of the source and its state as last
   tested or listed (migration V3, fields `updated`, `pieces`, `morePieces`, `state` and `checked` of a
   connection), the last update, and a header with the order (most recent first, or by name).
+- Adding a connection takes three steps (EXT-013): the types grouped by category with their logos; the
+  form of the connector, whose test previews the source (`POST /api/v1/ext/connections/connections/preview`)
+  or shows its error; the name proposed, the type fixed, description, thumbnail and tags, which
+  `POST /api/v1/ext/connections/connections` now takes.
 - Connections carry a type, a category and free tags (EXT-012): the card and the detail show the type
   of the connector, which cannot be removed, its category, and the free tags kept by the kernel (MK-097),
   written and removed in the detail with suggestions of the tags in use; a Tags filter next to the Type

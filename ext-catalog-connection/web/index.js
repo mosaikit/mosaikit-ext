@@ -72,6 +72,22 @@ const STYLE = `
   form.connect label { display: grid; gap: 4px; }
   form.connect label.check { display: flex; gap: 8px; align-items: center; }
   form.connect .hint { color: var(--mk-muted); font-size: 12px; }
+  ol.steps { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 12px; padding: 0; counter-reset: step; }
+  ol.steps li { color: var(--mk-muted); font-size: 13px; }
+  ol.steps li[aria-current='step'] { color: var(--mk-fg); font-weight: 600; }
+  .choose section.category + section.category { margin-top: 12px; }
+  .choose h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mk-muted); margin: 0 0 6px; }
+  form.connect fieldset { display: grid; gap: 12px; border: 0; margin: 0; padding: 0; min-width: 0; }
+  form.connect legend { font-weight: 600; padding: 0; margin-bottom: 4px; }
+  form.connect .fixed-type, form.connect .new-tags { display: grid; gap: 4px; justify-items: start; }
+  form.connect .fixed-type .label { display: inline-flex; gap: 6px; align-items: center; padding: 2px 10px;
+                                     border: 1px solid var(--mk-fg); border-radius: 999px; font-weight: 600; font-size: 13px; }
+  form.connect .fixed-type img.logo { width: 16px; height: 16px; }
+  form.connect .add-tag { display: flex; gap: 6px; }
+  section.preview { border: 1px solid var(--mk-line); border-radius: var(--mk-radius); padding: 8px 12px; background: var(--mk-bg); }
+  section.preview h3 { font-size: 14px; margin: 0 0 6px; }
+  section.preview[data-result='failure'] { border-color: var(--mk-danger); }
+  section.preview .error { color: var(--mk-danger); margin: 0; }
   form.connect .chosen { display: flex; gap: 8px; align-items: center; font-weight: 600; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .table { overflow-x: auto; }
@@ -200,9 +216,10 @@ const extension = {
           <p role="status" aria-live="polite"></p>
           <section class="panel create" aria-labelledby="create-title" hidden>
             <h2 id="create-title"></h2>
+            <ol class="steps"></ol>
             <div class="choose">
               <p class="muted types-label"></p>
-              <ul class="types"></ul>
+              <div class="groups"></div>
               <p class="muted no-types" hidden></p>
             </div>
             <form class="connect" hidden></form>
@@ -623,6 +640,11 @@ const extension = {
       renderTags(connection) {
         const t = this.t;
         const place = this.root.querySelector('aside.detail .tags');
+        // Drawn again when the connection is read again: what the person is typing stays.
+        const typing = place.querySelector('input[name="tag"]');
+        const typed = typing && place.dataset.id === connection.id ? typing.value : '';
+        const focused = typing !== null && this.root.activeElement === typing;
+        place.dataset.id = connection.id;
         place.setAttribute('aria-label', t('factTags'));
         place.replaceChildren(this.labels(connection, true));
         if (!connection.editable) {
@@ -641,15 +663,20 @@ const extension = {
         const add = button(t('add'), null);
         add.type = 'submit';
         form.append(field, suggestions, add);
+        field.value = typed;
         form.onsubmit = async (event) => {
           event.preventDefault();
           const typed = field.value.trim();
+          field.value = '';
           if (typed) {
             await this.saveTags(connection, [...(connection.tags ?? []), typed]);
             this.root.querySelector('aside.detail form.add-tag input[name="tag"]')?.focus();
           }
         };
         place.append(form);
+        if (focused) {
+          field.focus();
+        }
       }
 
       /**
@@ -746,7 +773,11 @@ const extension = {
       async refresh(id) {
         try {
           const fresh = await call(`/connections/${encodeURIComponent(id)}`);
-          this.renderConnections((this.connections ?? []).map((connection) => (connection.id === id ? fresh : connection)));
+          // Only what a test or a listing measures: a change saved meanwhile is not undone.
+          const { pieces, morePieces, state, checked } = fresh;
+          this.renderConnections(
+            (this.connections ?? []).map((connection) => (connection.id === id ? { ...connection, pieces, morePieces, state, checked } : connection)),
+          );
         } catch {
           // The card keeps what it said; the next load reads it again.
         }
@@ -871,43 +902,98 @@ const extension = {
         return this.thumbnails.get(file);
       }
 
-      /** New connection: first the type of source, then its form. */
+      /**
+       * New connection, in three steps (EXT-013): what it is, the types of the connectors installed,
+       * with their logos, grouped by category; how to connect, the form of its connector, whose test
+       * shows a preview of the source or the error of the source; how it is named and found, its name
+       * proposed, its type fixed, its description, thumbnail and tags.
+       */
       async openCreate() {
         // The types are those of the connectors read with the list: wait for them.
         await this.loading;
+        const t = this.t;
         const section = this.root.querySelector('section.create');
         section.hidden = false;
-        section.querySelector('#create-title').textContent = this.t('new');
-        section.querySelector('.choose').hidden = false;
+        section.querySelector('#create-title').textContent = t('new');
         section.querySelector('form.connect').hidden = true;
-        const list = section.querySelector('ul.types');
+        const choose = section.querySelector('.choose');
+        choose.hidden = false;
+        this.steps(1, false);
         const connectors = this.connectors ?? [];
-        list.replaceChildren(
-          ...connectors.map((connector) => {
-            const item = document.createElement('li');
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.dataset.type = connector.type;
-            const what = document.createElement('span');
-            what.className = 'what';
-            const title = document.createElement('span');
-            title.className = 'type-title';
-            title.textContent = titleOf(context.locale, connector);
-            const category = document.createElement('span');
-            category.className = 'category';
-            category.textContent = categoryName(context.locale, connector.category);
-            what.append(title, category);
-            button.append(logo(connector), what);
-            button.addEventListener('click', () => this.openForm(connector));
-            item.append(button);
-            return item;
-          }),
+        const categories = new Map();
+        for (const connector of connectors) {
+          const name = categoryName(context.locale, connector.category);
+          if (!categories.has(name)) {
+            categories.set(name, []);
+          }
+          categories.get(name).push(connector);
+        }
+        const groups = choose.querySelector('.groups');
+        groups.replaceChildren(
+          ...[...categories.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([category, members], i) => {
+              const group = document.createElement('section');
+              group.className = 'category';
+              const title = document.createElement('h3');
+              title.id = `category-${i}`;
+              title.textContent = category;
+              group.setAttribute('aria-labelledby', title.id);
+              const list = document.createElement('ul');
+              list.className = 'types';
+              list.append(
+                ...members
+                  .sort((a, b) => titleOf(context.locale, a).localeCompare(titleOf(context.locale, b)))
+                  .map((connector) => {
+                    const item = document.createElement('li');
+                    const choice = document.createElement('button');
+                    choice.type = 'button';
+                    choice.dataset.type = connector.type;
+                    const what = document.createElement('span');
+                    what.className = 'what';
+                    const name = document.createElement('span');
+                    name.className = 'type-title';
+                    name.textContent = titleOf(context.locale, connector);
+                    const kind = document.createElement('span');
+                    kind.className = 'category';
+                    kind.textContent = category;
+                    what.append(name, kind);
+                    choice.append(logo(connector), what);
+                    choice.addEventListener('click', () => this.openForm(connector));
+                    item.append(choice);
+                    return item;
+                  }),
+              );
+              group.append(title, list);
+              return group;
+            }),
         );
-        section.querySelector('.no-types').hidden = connectors.length > 0;
-        list.querySelector('button')?.focus();
+        choose.querySelector('.no-types').hidden = connectors.length > 0;
+        groups.querySelector('button')?.focus();
       }
 
-      /** Edit: the form of the connector of a connection, with its values (EXT-015). */
+      /** The steps of the path, the current one marked; a connection being edited skips the first. */
+      steps(current, editing) {
+        const t = this.t;
+        const list = this.root.querySelector('section.create ol.steps');
+        list.setAttribute('aria-label', t('steps'));
+        list.replaceChildren(
+          ...['stepWhat', 'stepConnect', 'stepName']
+            .map((key, i) => ({ key, number: i + 1 }))
+            .filter(({ number }) => !editing || number > 1)
+            .map(({ key, number }) => {
+              const item = document.createElement('li');
+              item.dataset.step = String(number);
+              item.textContent = t(key);
+              if (number === current) {
+                item.setAttribute('aria-current', 'step');
+              }
+              return item;
+            }),
+        );
+      }
+
+      /** Edit: the steps of the connector of a connection after the first, with its values (EXT-015). */
       async openEdit(connection) {
         await this.loading;
         const connector = this.connectorOf(connection);
@@ -922,8 +1008,10 @@ const extension = {
       }
 
       /**
-       * The connection form that the connector declares, with a name, a description right under it, a
-       * credential and a thumbnail; empty for a new connection, with the values of one to edit.
+       * The second and third steps, in one form: how to connect, the form the connector declares and a
+       * credential, with the test that previews the source; then how it is named and found, a name, a
+       * description right under it, the fixed type, a thumbnail and tags. Empty for a new connection,
+       * with the values of one to edit.
        */
       openForm(connector, connection = null) {
         const t = this.t;
@@ -931,20 +1019,21 @@ const extension = {
         section.querySelector('.choose').hidden = true;
         const form = section.querySelector('form.connect');
         form.hidden = false;
+        form.noValidate = true;
         form.replaceChildren();
+        this.proposed = '';
+        this.preview = null;
+
+        // Step 2: how to connect.
+        const connect = document.createElement('fieldset');
+        connect.className = 'step connecting';
+        connect.dataset.step = '2';
+        const connectTitle = document.createElement('legend');
+        connectTitle.textContent = t('stepConnect');
         const chosen = document.createElement('div');
         chosen.className = 'chosen';
         chosen.append(logo(connector), document.createTextNode(titleOf(context.locale, connector)));
-        form.append(chosen);
-        const name = input('text', '__name', true);
-        name.value = connection?.name ?? '';
-        form.append(field(t('name'), name));
-        const description = document.createElement('textarea');
-        description.name = '__description';
-        description.rows = 2;
-        description.maxLength = 1000;
-        description.value = connection?.description ?? '';
-        form.append(field(t('description'), description, t('descriptionHint')));
+        connect.append(connectTitle, chosen);
         const values = connection?.settings ?? {};
         const schema = connector.form ?? {};
         const required = new Set(schema.required ?? []);
@@ -956,7 +1045,7 @@ const extension = {
             const label = document.createElement('label');
             label.className = 'check';
             label.append(box, document.createTextNode(title));
-            form.append(label);
+            connect.append(label);
             continue;
           }
           let control;
@@ -981,44 +1070,198 @@ const extension = {
           } else if (property.default !== undefined) {
             control.value = String(property.default);
           }
-          form.append(field(required.has(name) ? `${title} (${t('required')})` : title, control, property.description));
+          connect.append(field(required.has(name) ? `${title} (${t('required')})` : title, control, property.description));
         }
         const credential = input('text', '__credential', false);
         credential.value = connection?.credential ?? '';
-        form.append(field(t('credential'), credential, t('credentialHint')));
+        connect.append(field(t('credential'), credential, t('credentialHint')));
+        const preview = document.createElement('section');
+        preview.className = 'preview';
+        preview.setAttribute('aria-label', t('preview'));
+        preview.hidden = true;
+        connect.append(preview);
+        const connectActions = document.createElement('div');
+        connectActions.className = 'actions';
+        connectActions.append(button(t('test'), () => this.test(connector, form)));
+        if (!connection) {
+          connectActions.append(button(t('back'), () => this.openCreate()));
+        }
+        connectActions.append(button(t('next'), () => this.toNaming(connector, form, connection), 'primary'));
+        if (connection) {
+          connectActions.append(this.submitButton(t('save')));
+        }
+        connectActions.append(button(t('cancel'), () => this.closeCreate()));
+        connect.append(connectActions);
+
+        // Step 3: how it is named and found.
+        const naming = document.createElement('fieldset');
+        naming.className = 'step naming';
+        naming.dataset.step = '3';
+        naming.hidden = true;
+        const namingTitle = document.createElement('legend');
+        namingTitle.textContent = t('stepName');
+        naming.append(namingTitle);
+        const name = input('text', '__name', true);
+        name.maxLength = 200;
+        name.value = connection?.name ?? '';
+        naming.append(field(t('name'), name));
+        const description = document.createElement('textarea');
+        description.name = '__description';
+        description.rows = 2;
+        description.maxLength = 1000;
+        description.value = connection?.description ?? '';
+        naming.append(field(t('description'), description, t('descriptionHint')));
+        const type = document.createElement('div');
+        type.className = 'fixed-type';
+        const typeTerm = document.createElement('span');
+        typeTerm.textContent = t('factType');
+        const typeValue = document.createElement('span');
+        typeValue.className = 'label type';
+        typeValue.append(logo(connector), document.createTextNode(titleOf(context.locale, connector)));
+        type.append(typeTerm, typeValue);
+        naming.append(type);
         const image = input('file', '__thumbnail', false);
         image.accept = THUMBNAIL_TYPES;
-        form.append(field(t('thumbnail'), image, t('thumbnailHint')));
+        naming.append(field(t('thumbnail'), image, t('thumbnailHint')));
         if (connection?.thumbnail) {
           const remove = input('checkbox', '__removeThumbnail', false);
           const label = document.createElement('label');
           label.className = 'check';
           label.append(remove, document.createTextNode(t('removeThumbnail')));
-          form.append(label);
+          naming.append(label);
         }
-        const actions = document.createElement('div');
-        actions.className = 'actions';
-        const test = button(t('test'), () => this.test(connector, form));
-        const submit = button(t(connection ? 'save' : 'create'), null, 'primary');
-        submit.type = 'submit';
-        const cancel = button(t('cancel'), () => {
-          section.hidden = true;
-        });
-        if (connection) {
-          actions.append(test, submit, cancel);
-        } else {
-          actions.append(test, submit, button(t('back'), () => this.openCreate()), cancel);
+        if (!connection) {
+          naming.append(this.tagsField());
         }
-        form.append(actions);
+        const namingActions = document.createElement('div');
+        namingActions.className = 'actions';
+        namingActions.append(
+          button(t('previous'), () => this.toConnecting(form, connection)),
+          this.submitButton(t(connection ? 'save' : 'create')),
+          button(t('cancel'), () => this.closeCreate()),
+        );
+        naming.append(namingActions);
+
+        form.append(connect, naming);
         form.onsubmit = (event) => {
           event.preventDefault();
+          if (!this.valid(form)) {
+            return;
+          }
           if (connection) {
             this.save(connector, connection, form);
           } else {
             this.create(connector, form);
           }
         };
+        this.toConnecting(form, connection);
+      }
+
+      submitButton(text) {
+        const submit = button(text, null, 'primary');
+        submit.type = 'submit';
+        return submit;
+      }
+
+      closeCreate() {
+        this.root.querySelector('section.create').hidden = true;
+      }
+
+      /** Back to how to connect. */
+      toConnecting(form, connection) {
+        form.querySelector('fieldset.connecting').hidden = false;
+        form.querySelector('fieldset.naming').hidden = true;
+        this.steps(2, Boolean(connection));
+        form.querySelector('fieldset.connecting').querySelector('input:not([type=checkbox]), select')?.focus();
+      }
+
+      /**
+       * On to how it is named, once the settings are filled in: a new connection gets a name proposed
+       * from the address of its source, or from its type, which the person may change.
+       */
+      toNaming(connector, form, connection) {
+        if (!this.valid(form, form.querySelector('fieldset.connecting'))) {
+          return;
+        }
+        form.querySelector('fieldset.connecting').hidden = true;
+        form.querySelector('fieldset.naming').hidden = false;
+        this.steps(3, Boolean(connection));
+        const name = form.elements.namedItem('__name');
+        if (!connection && (name.value === '' || name.value === this.proposed)) {
+          this.proposed = proposedName(this.preview?.address, titleOf(context.locale, connector), this.request(connector, form).settings);
+          name.value = this.proposed;
+        }
         name.focus();
+      }
+
+      /** Whether the visible controls of the form, or of one step, are filled in as they must be. */
+      valid(form, scope = form) {
+        const controls = [...scope.querySelectorAll('input, select, textarea')].filter((control) => !control.closest('[hidden]'));
+        const wrong = controls.find((control) => !control.checkValidity());
+        if (wrong) {
+          wrong.reportValidity();
+          wrong.focus();
+          return false;
+        }
+        return true;
+      }
+
+      /** The tags of a new connection, added one by one and kept as the kernel keeps them (EXT-012). */
+      tagsField() {
+        const t = this.t;
+        this.newTags = [];
+        const box = document.createElement('div');
+        box.className = 'new-tags';
+        const title = document.createElement('span');
+        title.textContent = t('factTags');
+        const list = document.createElement('ul');
+        list.className = 'labels';
+        list.setAttribute('aria-label', t('factTags'));
+        const draw = () => {
+          list.replaceChildren(
+            ...this.newTags.map((tag) => {
+              const item = document.createElement('li');
+              item.className = 'label tag';
+              const words = document.createElement('span');
+              words.textContent = tag;
+              const remove = button('×', () => {
+                this.newTags = this.newTags.filter((other) => other !== tag);
+                draw();
+              }, 'remove');
+              remove.setAttribute('aria-label', t('removeTag', { tag }));
+              item.append(words, remove);
+              return item;
+            }),
+          );
+        };
+        const row = document.createElement('div');
+        row.className = 'add-tag';
+        const typed = input('text', '__tag', false);
+        typed.maxLength = 48;
+        typed.setAttribute('aria-label', t('addTag'));
+        typed.placeholder = t('addTag');
+        typed.setAttribute('list', 'new-tag-suggestions');
+        const suggestions = document.createElement('datalist');
+        suggestions.id = 'new-tag-suggestions';
+        typed.addEventListener('input', () => this.suggest(typed.value, suggestions));
+        const add = () => {
+          const tag = normalizeTag(typed.value);
+          if (tag && !this.newTags.includes(tag)) {
+            this.newTags = [...this.newTags, tag].sort();
+            draw();
+          }
+          typed.value = '';
+          typed.focus();
+        };
+        typed.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            add();
+          }
+        });
+        row.append(typed, suggestions, button(t('add'), add));
+        box.append(title, list, row);
+        return box;
       }
 
       /** What the form says, as the API takes it. */
@@ -1045,17 +1288,77 @@ const extension = {
         };
       }
 
+      /**
+       * Tests the settings of the form: a source that answers shows a preview of what it holds, one
+       * that does not shows the error it returned (EXT-013).
+       */
       async test(connector, form) {
         const t = this.t;
+        const preview = form.querySelector('section.preview');
         this.status(t('testing'));
         try {
-          const result = await call('/connections/test', {
+          const result = await call('/connections/preview', {
             method: 'POST',
             body: JSON.stringify(this.request(connector, form)),
           });
+          this.preview = result;
           this.status(t(result.success ? 'tested' : 'testFailed', result), !result.success);
+          this.renderPreview(preview, result);
         } catch (error) {
+          this.preview = null;
           this.status(t('testFailed', { message: error.message }), true);
+          this.renderPreview(preview, { success: false, message: error.message });
+        }
+      }
+
+      /** The preview of a source after a test: the first pieces it holds, or why there is none. */
+      renderPreview(preview, result) {
+        const t = this.t;
+        preview.hidden = false;
+        preview.dataset.result = result.success ? 'success' : 'failure';
+        const title = document.createElement('h3');
+        title.textContent = t('preview');
+        if (!result.success) {
+          const error = document.createElement('p');
+          error.className = 'error';
+          error.setAttribute('role', 'alert');
+          error.textContent = t('previewFailed', result);
+          preview.replaceChildren(title, error);
+          return;
+        }
+        const contents = result.contents;
+        if (!contents || contents.state !== 'listed') {
+          const note = document.createElement('p');
+          note.className = 'state';
+          note.setAttribute('role', 'note');
+          note.textContent = contents
+            ? t(STATE_MESSAGES[contents.state] ?? 'contentsEmpty', { detail: contents.detail ?? '' }).trim()
+            : t('contentsEmpty');
+          preview.replaceChildren(title, note);
+          return;
+        }
+        const list = document.createElement('ul');
+        list.className = 'entries';
+        list.append(
+          ...contents.items.map((piece) => {
+            const item = document.createElement('li');
+            item.dataset.id = piece.id;
+            const name = document.createElement('span');
+            name.className = 'name';
+            name.textContent = piece.name;
+            const kind = document.createElement('span');
+            kind.className = 'kind';
+            kind.textContent = kindName(context.locale, piece.kind);
+            item.append(name, kind);
+            return item;
+          }),
+        );
+        preview.replaceChildren(title, list);
+        if (contents.more) {
+          const more = document.createElement('p');
+          more.className = 'muted';
+          more.textContent = t('previewMore');
+          preview.append(more);
         }
       }
 
@@ -1064,10 +1367,10 @@ const extension = {
         try {
           const created = await call('/connections', {
             method: 'POST',
-            body: JSON.stringify(this.request(connector, form)),
+            body: JSON.stringify({ ...this.request(connector, form), tags: this.newTags ?? [] }),
           });
           await this.saveThumbnail(created, form);
-          this.root.querySelector('section.create').hidden = true;
+          this.closeCreate();
           this.status(t('created', created));
           this.loading = this.load();
           await this.loading;
@@ -1086,7 +1389,7 @@ const extension = {
             body: JSON.stringify({ name, description, settings, credential }),
           });
           await this.saveThumbnail(saved, form);
-          this.root.querySelector('section.create').hidden = true;
+          this.closeCreate();
           this.status(t('saved', saved));
           this.loading = this.load();
           await this.loading;
@@ -1233,6 +1536,22 @@ const extension = {
     customElements.define(ELEMENT, Connections);
   },
 };
+
+/** A tag as the kernel keeps it (MK-097): trimmed, one space between words, lowercase. */
+function normalizeTag(tag) {
+  return String(tag ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * The name proposed for a new connection (EXT-013): the address of its source without its scheme, as
+ * the test of the source told it, or else the type with the first value of its settings.
+ */
+function proposedName(address, type, settings) {
+  const where = address
+    ? address.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/\/+$/, '')
+    : Object.values(settings ?? {}).find((value) => typeof value === 'string' && value.trim() !== '');
+  return (where ? `${type} ${where}` : type).slice(0, 200);
+}
 
 /** The text of each status of a connection on its card (EXT-014). */
 const STATUS_MESSAGES = {

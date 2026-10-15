@@ -66,11 +66,26 @@ those they edit: name, description, settings, credential and thumbnail; the type
 | `GET /api/v1/ext/connections/tags?prefix=` | | the tags in use that start with the prefix, among the resources the person reads, the most used first |
 | `PUT /api/v1/ext/connections/connections/{id}/thumbnail` | `edit` | uploads the thumbnail, the image as the body with its `Content-Type` |
 | `DELETE /api/v1/ext/connections/connections/{id}/thumbnail` | `edit` | back to the generated thumbnail |
+| `POST /api/v1/ext/connections/connections/preview` | | tests settings before creating: `{success, message, address, contents}`, the first pieces of the source when it answers |
 | `POST /api/v1/ext/connections/connections/{id}/test`, `GET .../{id}/contents` | `use` | test, contents |
 
 The list page has the shape of the list page of the UI kit of Mosaikit (MK-105) and takes the same
 inputs (facets, card, columns). The shell defines the elements of the kit only for the frontends that
 run as modules, not in the frame of an isolated one, so `web/list.js` stays until the frame has them too.
+
+## Adding a connection
+
+New connection takes three steps, one path for every kind of source (EXT-013):
+
+1. **What it is**: the types of the connectors installed, each with its logo, grouped by category.
+2. **How to connect**: the connection form its connector declares, and a credential. Its test is a
+   preview: a source that answers shows the first pieces it holds, one that does not shows the error
+   it returned.
+3. **How it is named and found**: a name proposed from the address of the source (or from the type and
+   the settings), a description, the type, fixed, a thumbnail and tags.
+
+Creating it closes the panel, and the new connection is in the list. Editing a connection takes the
+second and third steps, filled in, its type fixed.
 
 ## The detail of a connection
 

@@ -127,9 +127,28 @@ public class ConnectionResource {
     /** The usable connectors, and the problems of those refused. */
     public record ConnectorsView(List<ConnectorView> connectors, List<ProblemView> problems) {}
 
-    /** Request to create a connection, or to test one before creating it. */
+    /** Request to create a connection, with its free tags (EXT-013), or to test one before creating it. */
     public record NewConnection(
-            String name, String type, String description, Map<String, Object> settings, String credential) {}
+            String name,
+            String type,
+            String description,
+            Map<String, Object> settings,
+            String credential,
+            List<String> tags) {}
+
+    /** The pieces a preview shows. */
+    static final int PREVIEW = 20;
+
+    /**
+     * The test of the settings of a connection not yet created, with a preview of its source (EXT-013).
+     *
+     * @param success whether the source answered
+     * @param message what the connector or the source said
+     * @param address the address of the source, from which the app proposes a name
+     * @param contents the first pieces at the top level of the source when it answered, or why there
+     *     are none
+     */
+    public record Preview(boolean success, String message, String address, ContentsView contents) {}
 
     /**
      * Request to change a connection, whose type never changes: its name, its description (empty or
@@ -340,6 +359,13 @@ public class ConnectionResource {
         connections.insert(connection);
         // The kernel records the person of the request as the owner (EXT-015), in the same transaction.
         resources.register(ref(connection.getId()), details(connection));
+        if (request.tags() != null && !request.tags().isEmpty()) {
+            try {
+                tags.replace(ref(connection.getId()), request.tags());
+            } catch (IllegalArgumentException e) {
+                throw problem(Response.Status.BAD_REQUEST, e.getMessage());
+            }
+        }
         return Response.status(Response.Status.CREATED)
                 .entity(view(connection, discovery))
                 .build();
@@ -475,6 +501,35 @@ public class ConnectionResource {
         Discovery.Found found = usable(catalog.discover(), request.type());
         Map<String, Object> values = checked(found.declaration(), request.settings());
         return test(found.connector(), values, credentialName(request.credential()));
+    }
+
+    /**
+     * Tests the settings of a connection before it is created and, when the source answers, lists the
+     * first pieces of its top level: the test shows what the source holds, not only that it answers
+     * (EXT-013). A source that does not answer gives its error.
+     */
+    @POST
+    @Path("connections/preview")
+    public Preview preview(NewConnection request) {
+        if (request == null) {
+            throw problem(Response.Status.BAD_REQUEST, "The type and the settings are required");
+        }
+        Discovery.Found found = usable(catalog.discover(), request.type());
+        Map<String, Object> values = checked(found.declaration(), request.settings());
+        String credential = credentialName(request.credential());
+        String address = Addresses.of(found.connector(), values).orElse(null);
+        TestResult result = test(found.connector(), values, credential);
+        if (!result.success()) {
+            return new Preview(false, result.message(), address, null);
+        }
+        ContentsView contents = withSettings(values, credential, settings -> {
+            try {
+                return ContentsView.listed("", found.connector().list(settings, "", new Paging(0, PREVIEW)), true);
+            } catch (ContentsUnavailableException e) {
+                return ContentsView.unavailable("", e);
+            }
+        });
+        return new Preview(true, result.message(), address, contents);
     }
 
     /** Tests a connection that the person uses, with its settings and credential. */

@@ -67,14 +67,15 @@ test.describe('EXT-010 connectors are extensions, discovered by the connection f
     await page.getByRole('button', { name: /Sample source/ }).click();
 
     // The form the connector declares: a required host and a port with its default.
-    await page.getByLabel('Name', { exact: true }).fill(name);
-    await expect(page.getByLabel('Port')).toHaveValue('9000');
+    await expect(page.getByLabel('Port', { exact: true })).toHaveValue('9000');
     await page.getByLabel('Host (required)').fill('unreachable.example.org');
     await page.getByRole('button', { name: 'Test connection' }).click();
     await expect(page.getByRole('status')).toHaveText('Connection failed: unreachable.example.org does not answer');
     await page.getByLabel('Host (required)').fill('db.example.org');
     await page.getByRole('button', { name: 'Test connection' }).click();
     await expect(page.getByRole('status')).toHaveText('Connection succeeded: Connected to db.example.org');
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await page.getByLabel('Name', { exact: true }).fill(name);
     await page.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(page.getByRole('status')).toHaveText(`Connection ${name} created.`);
 
