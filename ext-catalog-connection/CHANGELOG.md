@@ -18,6 +18,15 @@ and the versions [Semantic Versioning](https://semver.org/).
   `Connector.address` of version 1 of the contract. Connections are changed with
   `PUT /api/v1/ext/connections/connections/{id}`.
 
+- Every connection lists its contents in one shape, with what each piece can be used for (EXT-019):
+  version 1 of the contract lists `Piece`s (id, name, kind, container, facts such as `columns` and
+  `geometry`) instead of entries with a path, and tells an unreachable source, one that needs a
+  declaration and a kind not yet readable apart with `ContentsUnavailableException`; the contents API
+  answers a state for each, and an empty source, which the app shows with four different messages. The
+  extensions that consume data contribute their uses of pieces to the point `catalog.connection.use`,
+  with the kinds and facts they need, and the app shows on each piece the uses it allows.
+- Queries on connections (EXT-040): `Connector.query` returns the rows of a query capped at the row
+  limit, through `POST /api/v1/ext/connections/connections/{id}/query`.
 - Connectors are extensions, discovered by the framework (EXT-010): the contract `connector`
   version 1, in the artifact `ext-catalog-connection-api`, with which a connector declares its type,
   title, logo, category and connection form, tests a connection and lists its contents. The app lists

@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 Massimo Antonini
+# SPDX-License-Identifier: MPL-2.0
+# An extension of the tests that consumes data (EXT-019): it contributes its uses of the pieces of
+# connections to the point of the framework, each with the kinds it takes and the facts it needs.
+# Nothing in the framework or in the connectors names it. Installed as a directory, without a build.
+id: org.example.consumer
+version: 0.1.0
+name: Sample consumer
+description: An extension of the tests of the connection framework that offers uses of the pieces of connections.
+kind: [extension]
+platform: '>=0.1 <1'
+frontend:
+  entry: web/index.js
+  isolation: module
+contributes:
+  catalog.connection.use:
+    - id: chart
+      title: Chart
+      description: A chart of the rows of a table or a view.
+      kinds: [table, view]
+      facts: [columns]
+      i18n:
+        it: { title: Grafico, description: Un grafico delle righe di una tabella o di una vista. }
+    - id: map
+      title: Map
+      kinds: [table, view]
+      facts: [geometry]
+      i18n:
+        it: { title: Mappa }
+    - id: monitor
+      title: Live view
+      kinds: [topic]
+      i18n:
+        it: { title: Vista in diretta }
+    - id: process
+      title: Process input
+      kinds: [table, view, topic, endpoint]
+      i18n:
+        it: { title: Input di un processo }

@@ -33,9 +33,9 @@ async function sampleConnection(name: string, credential: string | null = null):
   return body as Connection;
 }
 
-/** The entries of the contents of a connection, as the app lists them. */
+/** The names of the pieces of the contents of a connection, as the app lists them. */
 function entries(page: Page, name: string) {
-  return page.getByRole('region', { name: `Contents of ${name}` }).locator('ul.entries > li');
+  return page.getByRole('region', { name: `Contents of ${name}` }).locator('ul.entries > li > .name');
 }
 
 async function openConnections(page: Page): Promise<void> {
@@ -80,9 +80,9 @@ test.describe('EXT-010 connectors are extensions, discovered by the connection f
 
     // Its contents, as the connector lists them.
     await page.getByRole('button', { name, exact: true }).click();
-    await expect(entries(page, name)).toHaveText(['salesschema', 'archivefolder']);
-    await entries(page, name).getByRole('button', { name: 'sales' }).click();
-    await expect(entries(page, name)).toHaveText(['customerstable', 'orderstable']);
+    await expect(entries(page, name)).toHaveText(['sales', 'places', 'archive']);
+    await entries(page, name).filter({ hasText: /^sales$/ }).click();
+    await expect(entries(page, name)).toHaveText(['customers', 'orders']);
 
     const { body } = await api(member(), `${API}/connections`);
     const created = (body as Connection[]).find((connection) => connection.name === name);
@@ -118,8 +118,8 @@ test.describe('EXT-010 connectors are extensions, discovered by the connection f
   test('EXT-010 a connector whose declaration lacks a field is refused naming it, the others keep working', async ({ page }) => {
     const { body } = await api(member(), `${API}/connectors`);
     const { connectors, problems } = body as { connectors: { type: string }[]; problems: unknown[] };
-    // The connector of the tests declares two types (EXT-011); the refused one declares none.
-    expect(connectors.map((connector) => connector.type).sort()).toEqual(['sample', 'sample-files']);
+    // The connectors of the tests declare their types (EXT-011, EXT-019); the refused one declares none.
+    expect(connectors.map((connector) => connector.type).sort()).toEqual(['sample', 'sample-api', 'sample-files', 'sample-stream']);
     expect(problems).toEqual([{ extension: BROKEN, field: 'category', message: 'the field category is missing' }]);
 
     // Refused when the kernel starts, in the log of the installation.
@@ -181,7 +181,7 @@ test.describe('EXT-010 connectors are extensions, discovered by the connection f
     const again = await browser.newPage();
     await openConnections(again);
     await again.getByRole('button', { name, exact: true }).click();
-    await expect(entries(again, name)).toHaveText(['salesschema', 'archivefolder']);
+    await expect(entries(again, name)).toHaveText(['sales', 'places', 'archive']);
     await again.close();
   });
 });

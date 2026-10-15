@@ -15,10 +15,12 @@ import dev.mosaikit.kernel.api.sharing.Sharing;
 import dev.mosaikit.kernel.api.teams.People;
 import io.github.mosaikit.ext.catalog.connection.api.v1.ConnectionSettings;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Connector;
+import io.github.mosaikit.ext.catalog.connection.api.v1.ContentsUnavailableException;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Declaration;
-import io.github.mosaikit.ext.catalog.connection.api.v1.Entry;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Page;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Paging;
+import io.github.mosaikit.ext.catalog.connection.api.v1.Piece;
+import io.github.mosaikit.ext.catalog.connection.api.v1.Rows;
 import io.github.mosaikit.ext.catalog.connection.api.v1.TestResult;
 import io.quarkus.security.Authenticated;
 import jakarta.transaction.Transactional;
@@ -72,7 +74,7 @@ public class ConnectionResource {
     /** The identifier of the extension, which it names in every call to the kernel. */
     static final String EXTENSION = Connector.FRAMEWORK;
 
-    /** The most entries of a page of contents. */
+    /** The most pieces of a page of contents. */
     static final int MAX_PAGE = 500;
 
     /** The resource type of a connection in the manifest. */
@@ -95,6 +97,10 @@ public class ConnectionResource {
      * by the kernel, must not carry scripts.
      */
     static final Set<String> THUMBNAIL_TYPES = Set.of("image/png", "image/jpeg", "image/gif", "image/webp");
+    /** The row limit of a query when the request gives none, and the most it may ask. */
+    static final int DEFAULT_ROWS = 100;
+
+    static final int MAX_ROWS = 1000;
 
     /**
      * A type of source that New connection offers.
@@ -167,8 +173,38 @@ public class ConnectionResource {
             UUID thumbnail,
             boolean editable) {}
 
-    /** A page of the contents of a connection. */
-    public record ContentsView(String path, List<Entry> items, boolean more) {}
+    /**
+     * A page of the contents of a connection, in the one shape of every connector (EXT-019).
+     *
+     * @param parent the id of the container listed, empty for the top level
+     * @param state {@code listed}, or why there is nothing to list: {@code empty} (the source, or the
+     *     container, holds nothing), {@code unreachable} (the source does not answer), {@code
+     *     needs-declaration} (the source does not describe its contents) or {@code not-readable} (the
+     *     connector cannot read this kind yet); each one has its own message in the app
+     * @param detail what the source or the connector said, when the state is not {@code listed}
+     * @param items the pieces, each with its id, name, kind and facts
+     */
+    public record ContentsView(String parent, String state, String detail, List<Piece> items, boolean more) {
+
+        static ContentsView listed(String parent, Page<Piece> page, boolean first) {
+            if (first && page.items().isEmpty()) {
+                return new ContentsView(parent, "empty", null, List.of(), false);
+            }
+            return new ContentsView(parent, "listed", null, page.items(), page.more());
+        }
+
+        static ContentsView unavailable(String parent, ContentsUnavailableException e) {
+            String state = switch (e.reason()) {
+                case UNREACHABLE -> "unreachable";
+                case NEEDS_DECLARATION -> "needs-declaration";
+                case NOT_READABLE -> "not-readable";
+            };
+            return new ContentsView(parent, state, e.getMessage(), List.of(), false);
+        }
+    }
+
+    /** A query to run on a connection, with its row limit. */
+    public record QueryRequest(String statement, Integer limit) {}
 
     private final Connections connections;
     private final ConnectorCatalog catalog;
@@ -392,15 +428,16 @@ public class ConnectionResource {
     }
 
     /**
-     * The contents of a connection that the person uses at a path, its top level without one, as its
-     * connector lists them.
+     * The pieces of a connection (EXT-019): its top level without a parent, then what the container
+     * with that id holds, as its connector lists them, read on the server, which reaches sources the
+     * browser cannot. A source that cannot be listed answers with the reason, never with an empty list.
      */
     @GET
     @Path("connections/{id}/contents")
     @Transactional
     public ContentsView contents(
             @PathParam("id") UUID id,
-            @QueryParam("path") @DefaultValue("") String path,
+            @QueryParam("parent") @DefaultValue("") String parent,
             @QueryParam("offset") @DefaultValue("0") int offset,
             @QueryParam("limit") @DefaultValue("100") int limit) {
         if (offset < 0 || limit < 1 || limit > MAX_PAGE) {
@@ -408,14 +445,45 @@ public class ConnectionResource {
         }
         Connection connection = find(id, USE);
         Connector connector = available(connection, catalog.discover()).connector();
-        Page<Entry> page = withSettings(connection.getSettings(), connection.getCredential(), settings -> {
+        return withSettings(connection.getSettings(), connection.getCredential(), settings -> {
             try {
-                return connector.list(settings, path, new Paging(offset, limit));
+                return ContentsView.listed(parent, connector.list(settings, parent, new Paging(offset, limit)), offset == 0);
+            } catch (ContentsUnavailableException e) {
+                return ContentsView.unavailable(parent, e);
             } catch (IllegalArgumentException e) {
-                throw problem(Response.Status.NOT_FOUND, "No such path in the source: " + path);
+                throw problem(Response.Status.NOT_FOUND, "No such container in the source: " + parent);
             }
         });
-        return new ContentsView(path, page.items(), page.more());
+    }
+
+    /**
+     * Runs a query on a connection whose connector takes queries (EXT-040), and returns at most the row
+     * limit of rows, saying whether the source had more. The connector runs it so that it only reads.
+     */
+    @POST
+    @Path("connections/{id}/query")
+    @Transactional
+    public Rows query(@PathParam("id") UUID id, QueryRequest request) {
+        if (request == null || request.statement() == null || request.statement().isBlank()) {
+            throw problem(Response.Status.BAD_REQUEST, "The statement of the query is required");
+        }
+        int limit = request.limit() == null ? DEFAULT_ROWS : request.limit();
+        if (limit < 1 || limit > MAX_ROWS) {
+            throw problem(Response.Status.BAD_REQUEST, "The row limit is from 1 to " + MAX_ROWS);
+        }
+        Connection connection = find(id, USE);
+        Connector connector = available(connection, catalog.discover()).connector();
+        return withSettings(connection.getSettings(), connection.getCredential(), settings -> {
+            try {
+                return connector.query(settings, request.statement(), limit);
+            } catch (UnsupportedOperationException e) {
+                throw problem(Response.Status.NOT_IMPLEMENTED, "The connector of this connection runs no queries");
+            } catch (ContentsUnavailableException e) {
+                throw problem(Response.Status.BAD_GATEWAY, e.getMessage());
+            } catch (IllegalArgumentException e) {
+                throw problem(Response.Status.BAD_REQUEST, e.getMessage());
+            }
+        });
     }
 
     private TestResult test(Connector connector, Map<String, Object> values, String credential) {

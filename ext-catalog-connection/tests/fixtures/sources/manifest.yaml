@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 Massimo Antonini
+# SPDX-License-Identifier: MPL-2.0
+# Two connectors of the tests of the contents of connections (EXT-019): a stream of topics and an API of
+# endpoints, which list their pieces in the shape of every connector. Nothing in the framework names them.
+id: org.example.connector.sources
+version: 0.1.0
+name: Sample stream and API connectors
+description: Two connectors of the tests of the connection framework, a stream and an API, in memory.
+kind: [service]
+platform: '>=0.1 <1'
+backend:
+  jar: lib/connector-sources.jar
+  # Required with Java code, although a connector serves no REST resource of its own.
+  api: connector-sources
+contracts:
+  implements:
+    - contract: io.github.mosaikit.ext.catalog.connection/connector
+      version: 1
+      api: io.github.mosaikit.ext:ext-catalog-connection-api
+libraries:
+  # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
+  - jar: 'lib/ext-catalog-connection-api-0.1.0.jar'
+    coordinates: 'io.github.mosaikit.ext:ext-catalog-connection-api:0.1.0'
+    sha256: 'f007057f67c70b173f69d3ef893405fb3ae48fdb040070a57106344b2c3cbb25'

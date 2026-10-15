@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import io.github.mosaikit.ext.catalog.connection.api.v1.ConnectionSettings;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Connector;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Declaration;
-import io.github.mosaikit.ext.catalog.connection.api.v1.Entry;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Page;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Paging;
+import io.github.mosaikit.ext.catalog.connection.api.v1.Piece;
 import io.github.mosaikit.ext.catalog.connection.api.v1.TestResult;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,7 +46,7 @@ class AddressesTest {
         }
 
         @Override
-        public Page<Entry> list(ConnectionSettings settings, String path, Paging paging) {
+        public Page<Piece> list(ConnectionSettings settings, String parent, Paging paging) {
             return new Page<>(List.of(), false);
         }
 

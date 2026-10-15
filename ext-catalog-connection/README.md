@@ -13,7 +13,7 @@ one `EXT-nnn.md` each, and its changes in [`CHANGELOG.md`](CHANGELOG.md).
 |---|---|
 | `manifest.yaml` | identity, backend, database, the contract it provides, frontend and contributions of the extension |
 | `api/` | `io.github.mosaikit.ext:ext-catalog-connection-api`, the contract that connectors implement (EXT-010) |
-| `src/main/java/` | the backend: the connectors found through the contract, the connections, `/api/v1/ext/connections` |
+| `src/main/java/` | the backend: the connectors found through the contract, the connections, their contents and queries, `/api/v1/ext/connections` |
 | `db/` | the migrations of the schema `ext_catalog_connection` |
 | `web/index.js` | the app, a custom element the shell renders at `/app/connections` |
 | `web/list.js` | the list page of the app: header with the count and the grid/rows switch, the column of filters, cards and rows |
@@ -21,7 +21,7 @@ one `EXT-nnn.md` each, and its changes in [`CHANGELOG.md`](CHANGELOG.md).
 | `web/i18n.js` | the texts of the app in English and Italian, chosen by `context.locale` |
 | `pom.xml` | the build, on the parent of Mosaikit extensions `io.github.mosaikit:mosaikit-extension-parent` |
 | `package.json`, `playwright.config.ts`, `tests/` | the bench of `@mosaikit/testing` and the Playwright tests |
-| `tests/fixtures/` | two connectors of the tests, built with the framework: a sample source (two types, sample source and sample files), and one whose declaration lacks a field |
+| `tests/fixtures/` | the extensions of the tests: connectors built with the framework (a sample source with two types, sample source and sample files, a sample stream and API, one whose declaration lacks a field) and an extension that contributes uses of pieces |
 | `docs/requirements/` | the requirements of this extension |
 
 ## The list of connections
@@ -79,7 +79,7 @@ public class FilesConnector implements Connector {
     }
 
     public TestResult test(ConnectionSettings settings) { ... }
-    public Page<Entry> list(ConnectionSettings settings, String path, Paging paging) { ... }
+    public Page<Piece> list(ConnectionSettings settings, String parent, Paging paging) { ... }
 }
 ```
 
@@ -112,13 +112,49 @@ contracts:
   secrets service of the platform); the framework reads it at the moment of a call and passes it in
   `ConnectionSettings`. The connector never keeps it, logs it or returns it, and no answer of the API
   of the framework contains it.
+- **Contents** (EXT-019): every connector lists what a source holds in one shape, `Piece`: an id
+  (unique and stable in the connection, passed back to list what a container holds, and kept by other
+  extensions as their reference to the piece), a name, a kind (`schema`, `table`, `view`, `topic`,
+  `endpoint`, `folder`, `file`, or one of its own), whether it is a container, and its **facts**, what
+  the connector knows of it by name: `columns` (a list of `Column`, name and type), `geometry` (the
+  columns that hold geometries), `format` (of messages or responses), or facts of its own. A source
+  that cannot be listed throws `ContentsUnavailableException` with its reason: `UNREACHABLE` (with the
+  error of the source), `NEEDS_DECLARATION` (the source does not describe its contents) or
+  `NOT_READABLE` (a kind the connector cannot read yet, the default of `list`); a source with nothing
+  in it is an empty page. `GET /api/v1/ext/connections/connections/{id}/contents?parent=<id>` answers
+  `{parent, state, detail, items, more}`, with `state` `listed`, `empty`, `unreachable`,
+  `needs-declaration` or `not-readable`, and the app shows each with its own message, never an empty
+  list. Contents are read on the server, which reaches sources the browser cannot.
+- **Uses** (EXT-019): what a piece can be used for comes from the extensions that consume data, never
+  from the connector. Each contributes its uses to the point `catalog.connection.use` (version 1) of the
+  frontend of the framework, with the kinds of pieces it takes and the facts it needs; the app offers
+  on a piece the uses whose kinds include its kind and whose facts it has, while their extension is
+  active:
+
+  ```yaml
+  # manifest.yaml of an extension that consumes data
+  contributes:
+    catalog.connection.use:
+      - id: map
+        title: Map
+        description: The rows of a table on a map.
+        kinds: [table, view]
+        facts: [geometry]
+        i18n:
+          it: { title: Mappa, description: Le righe di una tabella su una mappa. }
+  ```
+
+- **Queries** (EXT-040): a connector of a source that takes queries, such as a SQL database, implements
+  `query(settings, statement, limit)`, which returns `Rows` (columns, at most `limit` rows, and whether
+  the source had more) and only reads; `POST /api/v1/ext/connections/connections/{id}/query` with
+  `{statement, limit}` (100 by default, at most 1000) runs it. A connector without queries answers 501.
 - **Removed or turned off**: the connections of a connector that is no longer active stay listed,
   unavailable, with the placeholder of the platform (MK-135), and work again when it comes back.
 - **Versions**: version 1 of the contract is the package `api.v1`. A breaking change is a new package
   `api.v2` with `version = 2` next to it, served together (`versions: [1, 2]` in the manifest of the
   framework) until version 1 is retired.
 
-`tests/fixtures/sample` is a complete small connector.
+`tests/fixtures/sample` is a complete small connector, `ext-catalog-connection-postgres` a real one.
 
 ## Build and test
 
