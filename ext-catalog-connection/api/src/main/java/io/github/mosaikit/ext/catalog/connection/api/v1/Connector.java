@@ -5,6 +5,7 @@ package io.github.mosaikit.ext.catalog.connection.api.v1;
 import dev.mosaikit.kernel.api.contract.Contract;
 import dev.mosaikit.kernel.api.contract.ContractImplementation;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * A kind of data source, version 1 of the contract "connector" of the connection framework (EXT-010,
@@ -77,6 +78,20 @@ public interface Connector extends ContractImplementation {
      */
     default Page<Piece> list(ConnectionSettings settings, String parent, Paging paging) {
         throw ContentsUnavailableException.notReadable("This connector cannot list the contents of its sources yet");
+    }
+
+    /**
+     * The kinds of pieces that the sources of this connector hold, such as {@code schema}, {@code table}
+     * and {@code view} (EXT-026): the source picker of the framework offers a type only to the editors
+     * whose uses take one of its kinds.
+     *
+     * <p>Empty by default: the framework then takes the kinds usual for the category of the
+     * declaration ({@code database} and {@code warehouse}: schema, table, view; {@code lake} and {@code
+     * files}: folder, file; {@code api}: endpoint; {@code stream}: topic), and offers the type to every
+     * editor when its category is one of its own.
+     */
+    default Set<String> kinds() {
+        return Set.of();
     }
 
     /**

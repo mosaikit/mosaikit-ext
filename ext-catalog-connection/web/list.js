@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Massimo Antonini
 // SPDX-License-Identifier: MPL-2.0
+import { SPLIT_STYLE, splitPane } from './split.js';
 
 /**
  * A list page with the shape of the other list pages of the platform (EXT-011, EXT-014): a header with
  * the number of items shown, the number selected, the order and a switch between a grid of cards and
  * rows, a column of facets that filters
- * instead of navigating, each value with the number of items it matches, and the items. It knows
+ * instead of navigating, each value with the number of items it matches, which the person widens by
+ * dragging its edge or with the keyboard (EXT-026), and the items. It knows
  * nothing of connections: the page gives the facets, the card and the columns. When the list page of
  * the UI kit of the platform is available, it takes the place of this module with the same inputs.
  */
@@ -22,8 +24,16 @@ export const LIST_STYLE = `
   .switch { display: inline-flex; border: 1px solid var(--mk-line); border-radius: var(--mk-radius); overflow: hidden; }
   .switch button { border: 0; border-radius: 0; }
   .switch button[aria-pressed='true'] { background: var(--mk-accent); color: var(--mk-accent-fg); }
-  .list-body { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); gap: 16px; align-items: start; }
-  @media (max-width: 720px) { .list-body { grid-template-columns: minmax(0, 1fr); } }
+  .list-body { min-width: 0; }
+  .list-body .facets { padding-right: 14px; }
+  .list-body .items { padding-left: 14px; min-width: 0; }
+  @media (max-width: 720px) {
+    .list-body > mk-split-pane, .list-body > .split { flex-direction: column; }
+    .list-body > mk-split-pane::part(handle), .list-body > .split > .split-handle { display: none; }
+    .list-body > mk-split-pane::part(pane), .list-body > .split > .split-pane { width: auto !important; }
+    .list-body .facets, .list-body .items { padding: 0; }
+    .list-body .facets { margin-bottom: 16px; }
+  }
   .facets { display: grid; gap: 16px; }
   .facet h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mk-muted); margin: 0 0 6px; }
   .facet ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
@@ -34,7 +44,7 @@ export const LIST_STYLE = `
   .facet .none { color: var(--mk-muted); font-size: 13px; }
   ul.cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
   ul.cards > li { min-width: 0; }
-`;
+${SPLIT_STYLE}`;
 
 /**
  * A list page in an element.
@@ -52,6 +62,9 @@ export const LIST_STYLE = `
  * @param {object} options.labels the texts: count(n), selected(n), clearSelection, select(item), sort,
  *     view, grid, rows, filters, noMatch, empty, none
  * @param {() => void} [options.rendered] called after each drawing of the items, such as to mark the selected one
+ * @param {boolean} [options.selectable] whether the items have selection boxes, true by default
+ * @param {{ name: string, label: string }} [options.pane] the name under which the browser keeps the width
+ *     of the column of facets, and the label of its handle; labels.resize by default
  */
 export class ListPage {
   constructor(container, options) {
@@ -129,7 +142,16 @@ export class ListPage {
     this.facets.setAttribute('aria-label', labels.filters);
     this.shown = document.createElement('div');
     this.shown.className = 'items';
-    body.append(this.facets, this.shown);
+    // The column of facets is as wide as the person makes it, by dragging or with the keyboard (EXT-026).
+    body.append(
+      splitPane(this.facets, this.shown, {
+        name: options.pane?.name ?? 'connections.filters',
+        label: options.pane?.label ?? labels.resize ?? labels.filters,
+        width: 220,
+        min: 160,
+        max: 480,
+      }),
+    );
     container.append(head, body);
   }
 
@@ -173,6 +195,9 @@ export class ListPage {
    * which the header counts.
    */
   selectionBox(item) {
+    if (this.options.selectable === false) {
+      return document.createTextNode('');
+    }
     const key = this.options.key(item);
     const box = document.createElement('input');
     box.type = 'checkbox';
@@ -306,10 +331,13 @@ export class ListPage {
     wrapper.className = 'table';
     const table = document.createElement('table');
     const head = document.createElement('tr');
-    const selectHead = document.createElement('th');
-    selectHead.scope = 'col';
-    selectHead.className = 'select';
-    head.append(selectHead);
+    const selectable = this.options.selectable !== false;
+    if (selectable) {
+      const selectHead = document.createElement('th');
+      selectHead.scope = 'col';
+      selectHead.className = 'select';
+      head.append(selectHead);
+    }
     for (const column of this.options.columns) {
       const cell = document.createElement('th');
       cell.scope = 'col';
@@ -323,10 +351,12 @@ export class ListPage {
       ...items.map((item) => {
         const row = document.createElement('tr');
         row.dataset.id = this.options.key(item);
-        const select = document.createElement('td');
-        select.className = 'select';
-        select.append(this.selectionBox(item));
-        row.append(select);
+        if (selectable) {
+          const select = document.createElement('td');
+          select.className = 'select';
+          select.append(this.selectionBox(item));
+          row.append(select);
+        }
         for (const column of this.options.columns) {
           const cell = document.createElement('td');
           cell.className = column.className ?? '';

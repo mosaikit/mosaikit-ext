@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import { categoryName, contributionText, kindName, titleOf, translator } from './i18n.js';
 import { LIST_STYLE, ListPage } from './list.js';
+import { definePicker, PICKER_STYLE } from './picker.js';
 import { generatedThumbnail } from './thumbnail.js';
 
 /**
@@ -176,6 +177,7 @@ const STYLE = `
   .parts { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
   .parts button.more { margin-top: 8px; }
   footer.detail-actions { flex: none; padding: 12px 16px; border-top: 1px solid var(--mk-line); background: var(--mk-surface); }
+${PICKER_STYLE}
 ${LIST_STYLE}`;
 
 /** @type {import('@mosaikit/sdk').MosaikitExtension} */
@@ -259,6 +261,11 @@ const extension = {
         root.querySelector('.types-label').textContent = t('types');
         root.querySelector('.no-types').textContent = t('noTypes');
         root.querySelector('#problems-title').textContent = t('refusedTitle');
+        if (this.picking) {
+          // The source picker (EXT-026) is this view: the picker gives the heading and the commands.
+          root.querySelector('header').hidden = true;
+          root.querySelector('.version').hidden = true;
+        }
         this.thumbnails = new Map();
         this.list = new ListPage(root.querySelector('.list'), {
           key: (connection) => connection.id,
@@ -274,6 +281,8 @@ const extension = {
           ],
           card: (connection) => this.card(connection),
           rendered: () => this.refreshSelection(),
+          // In the picker the choice is of pieces, not of connections (EXT-026).
+          selectable: !this.picking,
           // Most recent first by default, then by name (EXT-014).
           sorts: [
             { id: 'recent', title: t('sortRecent'), compare: (a, b) => time(b.updated) - time(a.updated) || byName(a, b) },
@@ -304,6 +313,7 @@ const extension = {
             noMatch: t('noMatch'),
             empty: t('empty'),
             none: t('noTypesConfigured'),
+            resize: t('resizeFilters'),
           },
         });
         root.querySelector('button.more').textContent = t('more');
@@ -324,6 +334,8 @@ const extension = {
         };
         this.escape = (event) => {
           if (event.key === 'Escape' && this.selected) {
+            // Only the detail closes, not the picker around it (EXT-026).
+            event.preventDefault();
             this.closeDetail(true);
           }
         };
@@ -387,7 +399,8 @@ const extension = {
         const focused = this.root.activeElement;
         const holder = focused?.closest?.('.list [data-id]');
         const kept = holder && ['button[aria-controls="detail"]', 'input.select'].find((selector) => focused.matches(selector));
-        this.list.setItems(connections);
+        // The picker offers the connections the person uses whose types hold what the uses take (EXT-026).
+        this.list.setItems(this.picking ? connections.filter((connection) => this.offered(connection)) : connections);
         if (kept) {
           this.root.querySelector(`.list [data-id="${CSS.escape(holder.dataset.id)}"] ${kept}`)?.focus();
         }
@@ -401,6 +414,20 @@ const extension = {
             this.closeDetail(false);
           }
         }
+      }
+
+      /**
+       * Whether the picker offers a connection (EXT-026): its connector is active, the person uses it,
+       * and its type holds a kind that one of the uses of the opening editor takes; a connector that
+       * does not say its kinds is offered.
+       */
+      offered(connection) {
+        const connector = this.connectorOf(connection);
+        if (!connector || connection.usable === false) {
+          return false;
+        }
+        const kinds = connector.kinds ?? [];
+        return kinds.length === 0 || this.picking.uses.some((use) => use.attributes.kinds.some((kind) => kinds.includes(kind)));
       }
 
       /** The connector of a connection when it is active. */
@@ -646,8 +673,8 @@ const extension = {
         const focused = typing !== null && this.root.activeElement === typing;
         place.dataset.id = connection.id;
         place.setAttribute('aria-label', t('factTags'));
-        place.replaceChildren(this.labels(connection, true));
-        if (!connection.editable) {
+        place.replaceChildren(this.labels(connection, !this.picking));
+        if (!connection.editable || this.picking) {
           return;
         }
         const form = document.createElement('form');
@@ -753,6 +780,7 @@ const extension = {
       renderDetailActions(connection) {
         const t = this.t;
         const footer = this.root.querySelector('aside.detail footer.detail-actions');
+        footer.hidden = Boolean(this.picking);
         footer.setAttribute('aria-label', t('detailActions', connection));
         const actions = [button(t('test'), () => this.testSaved(connection))];
         if (connection.editable) {
@@ -840,7 +868,7 @@ const extension = {
       actions(connection) {
         const actions = document.createElement('span');
         actions.className = 'actions';
-        if (connection.editable && this.connectorOf(connection)) {
+        if (connection.editable && this.connectorOf(connection) && !this.picking) {
           const edit = button(this.t('edit'), () => this.openEdit(connection), 'small');
           edit.setAttribute('aria-label', this.t('editNamed', connection));
           actions.append(edit);
@@ -1465,10 +1493,19 @@ const extension = {
             state.textContent = t(STATE_MESSAGES[page.state] ?? 'contentsEmpty', { detail: page.detail ?? '' }).trim();
             state.hidden = false;
           }
-          const uses = usesContributed(context);
+          // In the picker, only the uses of the editor that opened it (EXT-026).
+          const uses = this.picking ? this.picking.uses : usesContributed(context);
           const list = section.querySelector('ul.entries');
           for (const piece of page.items) {
-            list.append(this.pieceItem(connection, trail, piece, uses));
+            const item = this.pieceItem(connection, trail, piece, uses);
+            if (item) {
+              list.append(item);
+            }
+          }
+          if (this.picking && page.state === 'listed' && !page.more && list.childElementCount === 0) {
+            state.dataset.state = 'nothing-to-pick';
+            state.textContent = t('pickNothing');
+            state.hidden = false;
           }
           browsing.offset = offset + page.items.length;
           if (trail.length === 0 && offset === 0) {
@@ -1500,6 +1537,13 @@ const extension = {
         kind.textContent = kindName(context.locale, piece.kind);
         item.append(kind);
         const offered = uses.filter((use) => allows(use, piece));
+        if (this.picking && !piece.container) {
+          // The picker offers the pieces that a use of the editor takes, each with its box (EXT-026).
+          if (offered.length === 0) {
+            return null;
+          }
+          item.prepend(this.choice(connection, trail, piece, offered));
+        }
         if (offered.length > 0) {
           const list = document.createElement('ul');
           list.className = 'uses';
@@ -1531,9 +1575,54 @@ const extension = {
         }
         return item;
       }
+
+      /**
+       * The box that chooses a piece in the picker (EXT-026): a checkbox when the editor takes several
+       * pieces, a radio button when it takes one.
+       */
+      choice(connection, trail, piece, offered) {
+        const { picked, multiple } = this.picking;
+        const box = document.createElement('input');
+        box.type = multiple ? 'checkbox' : 'radio';
+        box.name = 'pick';
+        box.className = 'pick';
+        box.checked = picked.has(pickKey(connection.id, piece.id));
+        box.setAttribute('aria-label', this.t('pickPart', { name: piece.name }));
+        box.addEventListener('change', () => this.pick(connection, trail, piece, offered, box.checked));
+        return box;
+      }
+
+      /**
+       * Adds a piece to what the picker returns, or takes it away (EXT-026): a reference to the
+       * connection, as the registry of resources of the platform knows it, and to the piece, by its id
+       * and those of the containers above it; never the address of the source, so that whoever keeps the
+       * reference follows a change of it.
+       */
+      pick(connection, trail, piece, offered, chosen) {
+        const { picked, multiple } = this.picking;
+        const key = pickKey(connection.id, piece.id);
+        if (!multiple) {
+          picked.clear();
+        }
+        if (chosen) {
+          picked.set(key, {
+            reference: {
+              connection: { extension: EXTENSION, type: 'connection', id: connection.id },
+              part: { id: piece.id, parents: trail.map((step) => step.id), name: piece.name, kind: piece.kind },
+              uses: offered.map((use) => use.id),
+            },
+            label: [connection.name, ...trail.map((step) => step.name), piece.name].join(' / '),
+          });
+        } else {
+          picked.delete(key);
+        }
+        this.picking.changed();
+      }
     }
 
     customElements.define(ELEMENT, Connections);
+    // The source picker that the editors of other extensions open (EXT-026): this view in a dialog.
+    definePicker(context, { view: ELEMENT, uses: () => usesContributed(context) });
   },
 };
 
@@ -1551,6 +1640,11 @@ function proposedName(address, type, settings) {
     ? address.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/\/+$/, '')
     : Object.values(settings ?? {}).find((value) => typeof value === 'string' && value.trim() !== '');
   return (where ? `${type} ${where}` : type).slice(0, 200);
+}
+
+/** The key of a piece of a connection among those chosen in the picker. */
+function pickKey(connection, piece) {
+  return `${connection} ${piece}`;
 }
 
 /** The text of each status of a connection on its card (EXT-014). */

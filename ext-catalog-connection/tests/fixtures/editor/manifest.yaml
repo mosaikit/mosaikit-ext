@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 Massimo Antonini
+# SPDX-License-Identifier: MPL-2.0
+# An editor of the tests that takes data from connections (EXT-026), as the editors of dashboards and
+# processes will: it declares its uses of pieces at the point of the framework, and opens the source
+# picker of the framework through its contract, the element mosaikit-ext-catalog-connection-picker.
+# Nothing in the framework names it. Installed as a directory, without a build.
+id: org.example.editor
+version: 0.1.0
+name: Sample editor
+description: An editor of the tests of the connection framework that opens its source picker.
+kind: [app]
+platform: '>=0.1 <1'
+# It works without the framework: it then says that there is no source to choose (MK-132, MK-133).
+optional:
+  io.github.mosaikit.ext.catalog.connection: '>=0.1 <1'
+frontend:
+  entry: web/index.js
+  isolation: module
+contributes:
+  rail.app:
+    - id: editor
+      title: Editor
+      route: /app/editor
+      element: org-example-editor
+      order: 90
+      i18n:
+        it: { title: Editor }
+  catalog.connection.use:
+    - id: grid
+      title: Table
+      description: The rows of a table or a view, with its columns.
+      kinds: [table, view]
+      facts: [columns]
+      i18n:
+        it: { title: Tabella, description: "Le righe di una tabella o di una vista, con le sue colonne." }
+    - id: feed
+      title: Live feed
+      kinds: [topic]
+      i18n:
+        it: { title: Flusso in diretta }

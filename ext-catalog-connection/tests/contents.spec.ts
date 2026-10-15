@@ -7,7 +7,8 @@ import { api, member, openApp, signIn, unique } from '@mosaikit/testing/playwrig
 // The bench installs three connectors of the tests, which nothing in the framework names: a sample
 // database, a sample stream and a sample API; and an extension of the tests that consumes data and
 // contributes its uses of pieces (tests/fixtures/consumer): a chart of a table or view with columns, a
-// map of one with geometries, a live view of a topic, and the input of a process.
+// map of one with geometries, a live view of a topic, and the input of a process; the editor of the
+// tests of EXT-026 (tests/fixtures/editor) adds a table of a table or view with columns and a live feed.
 
 const API = '/api/v1/ext/connections';
 
@@ -127,6 +128,7 @@ test.describe('EXT-019 every connection lists its contents in one shape', () => 
     await expect(region.getByRole('list', { name: 'Uses of customers' }).getByRole('listitem')).toHaveText([
       'Chart',
       'Process input',
+      'Table',
     ]);
     await expect(piece(region, 'sales/customers').locator('ul.uses li[data-use="org.example.consumer/chart"]')).toHaveAttribute(
       'title',
@@ -139,12 +141,14 @@ test.describe('EXT-019 every connection lists its contents in one shape', () => 
       'Chart',
       'Map',
       'Process input',
+      'Table',
     ]);
 
     const topics = await open(page, stream.name);
     await expect(topics.getByRole('list', { name: 'Uses of orders' }).getByRole('listitem')).toHaveText([
       'Live view',
       'Process input',
+      'Live feed',
     ]);
     const endpoints = await open(page, rest.name);
     await expect(endpoints.getByRole('list', { name: 'Uses of /customers' }).getByRole('listitem')).toHaveText([
@@ -218,6 +222,7 @@ test.describe('EXT-019 in Italian', () => {
       'Grafico',
       'Mappa',
       'Input di un processo',
+      'Tabella',
     ]);
     await expect(piece(region, 'places/sites').locator('.columns')).toHaveText('Colonne: name text, location geometry');
 

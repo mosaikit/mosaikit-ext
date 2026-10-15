@@ -8,6 +8,14 @@ and the versions [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- One source picker for the editors of every extension (EXT-026): the element
+  `mosaikit-ext-catalog-connection-picker`, the view of the connections in a dialog, limited to the
+  uses that the opening extension contributes to `catalog.connection.use`, with single and multiple
+  choice; it returns references by id, which `POST /api/v1/ext/connections/references/resolve` gives
+  as they are now. Connectors may declare the kinds of their pieces with the new default method
+  `Connector.kinds` of version 1 of the contract (`kinds` in `GET .../connectors`), connections say
+  whether the person uses them (`usable`), and the column of filters is resized by dragging or with
+  the keyboard.
 - All connections of an organization in one list, filtered by type (EXT-011): a grid of cards with
   rows next to it, the Type filter computed from the connections with their numbers, and a thumbnail
   for each connection, uploaded or generated from its name.
