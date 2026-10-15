@@ -12,11 +12,12 @@ import io.github.mosaikit.ext.catalog.connection.api.v1.TestResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * A connector of the tests of the connection framework (EXT-010): a source with a few entries in memory.
  * A host named {@code unreachable.example.org} does not answer; a credential, when the connection has
- * one, must be {@code s3cret}.
+ * one, must be {@code s3cret}. It tells the address of its source itself (EXT-015).
  */
 @ApplicationScoped
 public class SampleConnector implements Connector {
@@ -64,6 +65,11 @@ public class SampleConnector implements Connector {
             return TestResult.failed(host + " refused the credential");
         }
         return TestResult.succeeded("Connected to " + host + (settings.credential().isPresent() ? " with the credential" : ""));
+    }
+
+    @Override
+    public Optional<String> address(ConnectionSettings settings) {
+        return settings.text("host").map(host -> "sample://" + host + settings.text("port").map(port -> ":" + port).orElse(""));
     }
 
     @Override

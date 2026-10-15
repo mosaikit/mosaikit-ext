@@ -118,7 +118,8 @@ test.describe('EXT-010 connectors are extensions, discovered by the connection f
   test('EXT-010 a connector whose declaration lacks a field is refused naming it, the others keep working', async ({ page }) => {
     const { body } = await api(member(), `${API}/connectors`);
     const { connectors, problems } = body as { connectors: { type: string }[]; problems: unknown[] };
-    expect(connectors.map((connector) => connector.type)).toEqual(['sample']);
+    // The connector of the tests declares two types (EXT-011); the refused one declares none.
+    expect(connectors.map((connector) => connector.type).sort()).toEqual(['sample', 'sample-files']);
     expect(problems).toEqual([{ extension: BROKEN, field: 'category', message: 'the field category is missing' }]);
 
     // Refused when the kernel starts, in the log of the installation.
@@ -163,7 +164,7 @@ test.describe('EXT-010 connectors are extensions, discovered by the connection f
       if (await page.evaluate(() => customElements.get('mk-reference-placeholder') !== undefined)) {
         await expect(page.locator(`mk-reference-placeholder[label="${name}"]`)).toBeVisible();
       }
-      await expect(page.getByRole('row').filter({ hasText: name })).toContainText(
+      await expect(page.getByRole('article', { name, exact: true })).toContainText(
         `Its connector, ${SAMPLE}, is not installed or is turned off for the organization.`,
       );
       await page.getByRole('button', { name: 'New connection' }).click();

@@ -1,14 +1,21 @@
 // SPDX-FileCopyrightText: 2026 Massimo Antonini
 // SPDX-License-Identifier: MPL-2.0
 import { categoryName, titleOf, translator } from './i18n.js';
+import { LIST_STYLE, ListPage } from './list.js';
+import { generatedThumbnail } from './thumbnail.js';
 
 /**
  * Frontend of the connections (EXT-010): a custom element that the shell renders for /app/connections.
- * It lists the connections of the organization and creates new ones. The types of source come from the
- * connectors installed, each an extension of its own that implements the contract of the framework
- * (MK-134): the app knows no type. A connection whose connector is absent stays in the list, marked
- * unavailable, and works again when the connector comes back. Styled with the --mk-* tokens of the
- * theme, in the language of the person.
+ * It lists the connections of the organization, creates new ones and changes them. The types of source
+ * come from the connectors installed, each an extension of its own that implements the contract of the
+ * framework (MK-134): the app knows no type. A connection whose connector is absent stays in the list,
+ * marked unavailable, and works again when the connector comes back. Styled with the --mk-* tokens of
+ * the theme, in the language of the person.
+ *
+ * Every connection the person views is a card of one grid, with rows next to it, whatever its
+ * connector, filtered by the types actually configured (EXT-011); each card shows a thumbnail,
+ * uploaded or generated from the name, the description or else the address of the source, and the
+ * owner (EXT-015).
  */
 
 const ELEMENT = 'mosaikit-ext-catalog-connection';
@@ -16,6 +23,10 @@ const API = '/api/v1/ext/connections';
 const PAGE = 100;
 /** The placeholder of the platform for what an absent extension provides (MK-135). */
 const PLACEHOLDER = 'mk-reference-placeholder';
+/** The identifier of the extension, which owns the files of the uploaded thumbnails. */
+const EXTENSION = 'io.github.mosaikit.ext.catalog.connection';
+/** The images a thumbnail may be, as the backend takes them. */
+const THUMBNAIL_TYPES = 'image/png,image/jpeg,image/gif,image/webp';
 
 const STYLE = `
   :host { display: block; color: var(--mk-fg); font-family: var(--mk-font); }
@@ -45,12 +56,31 @@ const STYLE = `
   ul.types .category { color: var(--mk-muted); font-size: 12px; }
   img.logo { width: 24px; height: 24px; flex: none; }
   form.connect { display: grid; gap: 12px; max-width: 520px; }
+  form.connect textarea { font: inherit; padding: 6px 10px; border: 1px solid var(--mk-line); border-radius: var(--mk-radius);
+                          background: var(--mk-bg); color: var(--mk-fg); min-height: 3.5em; resize: vertical; }
+  textarea:focus-visible { outline: 2px solid var(--mk-focus); outline-offset: 2px; }
   form.connect label { display: grid; gap: 4px; }
   form.connect label.check { display: flex; gap: 8px; align-items: center; }
   form.connect .hint { color: var(--mk-muted); font-size: 12px; }
   form.connect .chosen { display: flex; gap: 8px; align-items: center; font-weight: 600; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .table { overflow-x: auto; }
+  article.card { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; background: var(--mk-surface);
+                 border: 1px solid var(--mk-line); border-radius: var(--mk-radius); overflow: hidden; }
+  .thumb { display: block; background: var(--mk-bg); overflow: hidden; }
+  .thumb svg, .thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  article.card .thumb { aspect-ratio: 2 / 1; border-bottom: 1px solid var(--mk-line); }
+  td .thumb { width: 48px; height: 30px; flex: none; border-radius: 4px; }
+  article.card .body { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; flex: 1; min-width: 0; }
+  article.card h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+  .subtitle { margin: 0; color: var(--mk-muted); font-size: 13px; overflow-wrap: anywhere;
+              display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .kind { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+  .kind img.logo { width: 18px; height: 18px; }
+  article.card footer { display: flex; gap: 8px; align-items: center; justify-content: space-between;
+                        padding: 8px 12px; border-top: 1px solid var(--mk-line); font-size: 13px; }
+  .owner { color: var(--mk-muted); min-width: 0; overflow-wrap: anywhere; }
+  button.small { padding: 2px 10px; font-size: 13px; }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--mk-line); vertical-align: middle; }
   th { font-size: 13px; color: var(--mk-muted); font-weight: 600; }
@@ -66,11 +96,11 @@ const STYLE = `
   nav.path li + li::before { content: '/'; color: var(--mk-muted); margin-right: 4px; }
   ul.entries { list-style: none; margin: 0; padding: 0; }
   ul.entries li { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--mk-line); }
-  ul.entries .kind { color: var(--mk-muted); font-size: 12px; }
+  ul.entries .kind { color: var(--mk-muted); font-size: 12px; display: inline; }
   [role='status'] { min-height: 1.2em; margin: 8px 0; color: var(--mk-muted); }
   [role='status'].error { color: var(--mk-danger); }
   [hidden] { display: none !important; }
-`;
+${LIST_STYLE}`;
 
 /** @type {import('@mosaikit/sdk').MosaikitExtension} */
 const extension = {
@@ -121,13 +151,7 @@ const extension = {
             <h2 id="problems-title"></h2>
             <ul></ul>
           </section>
-          <div class="table">
-            <table>
-              <thead><tr><th scope="col" class="c-name"></th><th scope="col" class="c-type"></th><th scope="col" class="c-category"></th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <p class="muted empty" hidden></p>
+          <div class="list"></div>
           <section class="panel contents" aria-labelledby="contents-title" hidden>
             <h2 id="contents-title"></h2>
             <nav class="path"><ol></ol></nav>
@@ -146,10 +170,30 @@ const extension = {
         root.querySelector('.types-label').textContent = t('types');
         root.querySelector('.no-types').textContent = t('noTypes');
         root.querySelector('#problems-title').textContent = t('refusedTitle');
-        root.querySelector('.c-name').textContent = t('columnName');
-        root.querySelector('.c-type').textContent = t('columnType');
-        root.querySelector('.c-category').textContent = t('columnCategory');
-        root.querySelector('.empty').textContent = t('empty');
+        this.thumbnails = new Map();
+        this.list = new ListPage(root.querySelector('.list'), {
+          key: (connection) => connection.id,
+          facets: [{ id: 'type', title: t('facetType'), values: (connection) => [{ value: connection.type, label: this.typeTitle(connection) }] }],
+          card: (connection) => this.card(connection),
+          columns: [
+            { title: t('columnName'), className: 'name', cell: (connection) => this.nameCell(connection) },
+            { title: t('columnDescription'), cell: (connection) => subtitle(connection) },
+            { title: t('columnType'), cell: (connection) => this.kind(connection) },
+            { title: t('columnCategory'), cell: (connection) => this.categoryOf(connection) },
+            { title: t('columnOwner'), cell: (connection) => this.ownerOf(connection) },
+            { title: t('columnActions'), cell: (connection) => this.actions(connection) },
+          ],
+          labels: {
+            count: (count) => t(count === 1 ? 'countOne' : 'count', { count }),
+            view: t('view'),
+            grid: t('grid'),
+            rows: t('rows'),
+            filters: t('filters'),
+            noMatch: t('noMatch'),
+            empty: t('empty'),
+            none: t('noTypesConfigured'),
+          },
+        });
         root.querySelector('.nothing').textContent = t('contentsEmpty');
         root.querySelector('button.more').textContent = t('more');
         root.querySelector('button.close').textContent = t('close');
@@ -200,39 +244,155 @@ const extension = {
         section.hidden = problems.length === 0;
       }
 
+      /** Every connection the person views, as cards or rows, filtered by type (EXT-011). */
       renderConnections(connections) {
+        this.connections = connections;
+        this.list.setItems(connections);
+      }
+
+      /** The connector of a connection when it is active. */
+      connectorOf(connection) {
+        return connection.available ? this.connector(connection.type) : undefined;
+      }
+
+      /** The title of the type of a connection, as its connector declares it, or the type itself. */
+      typeTitle(connection) {
+        const connector = this.connectorOf(connection);
+        return connector ? titleOf(context.locale, connector) : connection.type;
+      }
+
+      categoryOf(connection) {
+        const connector = this.connectorOf(connection);
+        return connector ? categoryName(context.locale, connector.category) : '';
+      }
+
+      /** The card of a connection: thumbnail, name, description or address, type, owner and commands. */
+      card(connection) {
         const t = this.t;
-        const body = this.root.querySelector('tbody');
-        body.replaceChildren(
-          ...connections.map((connection) => {
-            const row = document.createElement('tr');
-            row.dataset.id = connection.id;
-            const name = document.createElement('td');
-            name.className = 'name';
-            const type = document.createElement('td');
-            const category = document.createElement('td');
-            const connector = connection.available ? this.connector(connection.type) : undefined;
-            if (connector) {
-              name.append(logo(connector));
-              const open = document.createElement('button');
-              open.type = 'button';
-              open.className = 'link';
-              open.textContent = connection.name;
-              open.addEventListener('click', () => this.openContents(connection, ''));
-              name.append(open);
-              type.textContent = titleOf(context.locale, connector);
-              category.textContent = categoryName(context.locale, connector.category);
-            } else {
-              // A connection whose connector is absent is kept as it is: the placeholder of the
-              // platform says what is missing (MK-135), and the app which connector brings it back.
-              name.append(placeholder(connection, t, context.locale));
-              type.textContent = connection.type;
-            }
-            row.append(name, type, category);
-            return row;
-          }),
-        );
-        this.root.querySelector('.empty').hidden = connections.length > 0;
+        const card = document.createElement('article');
+        card.className = 'card';
+        card.dataset.id = connection.id;
+        card.setAttribute('aria-label', connection.name);
+        const body = document.createElement('div');
+        body.className = 'body';
+        const connector = this.connectorOf(connection);
+        if (connector) {
+          const title = document.createElement('h3');
+          title.append(button(connection.name, () => this.openContents(connection, ''), 'link'));
+          body.append(title, subtitle(connection));
+        } else {
+          // A connection whose connector is absent is kept as it is: the placeholder of the
+          // platform says what is missing (MK-135), and the app which connector brings it back.
+          body.append(placeholder(connection, t, context.locale), subtitle(connection));
+        }
+        body.append(this.kind(connection));
+        const footer = document.createElement('footer');
+        footer.append(this.ownerOf(connection), this.actions(connection));
+        card.append(this.thumbnail(connection), body, footer);
+        return card;
+      }
+
+      /** The name of a connection in its row, with its thumbnail. */
+      nameCell(connection) {
+        const cell = document.createElement('div');
+        cell.className = 'kind';
+        cell.append(this.thumbnail(connection));
+        if (this.connectorOf(connection)) {
+          cell.append(button(connection.name, () => this.openContents(connection, ''), 'link'));
+        } else {
+          cell.append(placeholder(connection, this.t, context.locale));
+        }
+        return cell;
+      }
+
+      /** The type of a connection, with the logo of its connector when it is active. */
+      kind(connection) {
+        const kind = document.createElement('span');
+        kind.className = 'kind type';
+        const connector = this.connectorOf(connection);
+        if (connector) {
+          kind.append(logo(connector));
+        }
+        const text = document.createElement('span');
+        text.textContent = this.typeTitle(connection);
+        kind.append(text);
+        return kind;
+      }
+
+      /** The owner of a connection, as the kernel keeps it (EXT-015). */
+      ownerOf(connection) {
+        const owner = document.createElement('span');
+        owner.className = 'owner';
+        owner.textContent = connection.owner
+          ? this.t('owner', { name: connection.owner.name ?? this.t('formerMember') })
+          : this.t('ownerOrganization');
+        return owner;
+      }
+
+      /** The commands on a connection that the person may give. */
+      actions(connection) {
+        const actions = document.createElement('span');
+        actions.className = 'actions';
+        if (connection.editable && this.connectorOf(connection)) {
+          const edit = button(this.t('edit'), () => this.openEdit(connection), 'small');
+          edit.setAttribute('aria-label', this.t('editNamed', connection));
+          actions.append(edit);
+        }
+        return actions;
+      }
+
+      /**
+       * The thumbnail of a connection: the image uploaded for it, or one generated from its name, so
+       * that connections of one type do not look alike.
+       */
+      thumbnail(connection) {
+        const frame = document.createElement('span');
+        frame.className = 'thumb';
+        if (!connection.thumbnail) {
+          frame.dataset.thumbnail = 'generated';
+          frame.append(generatedThumbnail(connection.name));
+          return frame;
+        }
+        frame.dataset.thumbnail = 'uploaded';
+        const image = document.createElement('img');
+        image.alt = '';
+        frame.append(image);
+        this.thumbnailUrl(connection.thumbnail)
+          .then((url) => {
+            image.src = url;
+          })
+          .catch(() => {
+            // Not readable: the generated thumbnail instead.
+            frame.dataset.thumbnail = 'generated';
+            frame.replaceChildren(generatedThumbnail(connection.name));
+          });
+        return frame;
+      }
+
+      /**
+       * The address of an uploaded thumbnail: a signed link of the file service to the file (MK-093),
+       * asked once for this page. An image of the page loads it without the session of the person,
+       * from the origin of the installation, as its security policy allows.
+       */
+      thumbnailUrl(file) {
+        if (!this.thumbnails.has(file)) {
+          this.thumbnails.set(
+            file,
+            context
+              .fetch(`/api/v1/files/${EXTENSION}/links`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ file }),
+              })
+              .then(async (response) => {
+                if (!response.ok) {
+                  throw new Error(`HTTP ${response.status}`);
+                }
+                return (await response.json()).url;
+              }),
+          );
+        }
+        return this.thumbnails.get(file);
       }
 
       /** New connection: first the type of source, then its form. */
@@ -241,6 +401,7 @@ const extension = {
         await this.loading;
         const section = this.root.querySelector('section.create');
         section.hidden = false;
+        section.querySelector('#create-title').textContent = this.t('new');
         section.querySelector('.choose').hidden = false;
         section.querySelector('form.connect').hidden = true;
         const list = section.querySelector('ul.types');
@@ -270,8 +431,25 @@ const extension = {
         list.querySelector('button')?.focus();
       }
 
-      /** The connection form that the connector declares, with a name and a credential. */
-      openForm(connector) {
+      /** Edit: the form of the connector of a connection, with its values (EXT-015). */
+      async openEdit(connection) {
+        await this.loading;
+        const connector = this.connectorOf(connection);
+        if (!connector) {
+          return;
+        }
+        const section = this.root.querySelector('section.create');
+        section.hidden = false;
+        section.querySelector('#create-title').textContent = this.t('editNamed', connection);
+        this.openForm(connector, connection);
+        section.scrollIntoView?.({ block: 'nearest' });
+      }
+
+      /**
+       * The connection form that the connector declares, with a name, a description right under it, a
+       * credential and a thumbnail; empty for a new connection, with the values of one to edit.
+       */
+      openForm(connector, connection = null) {
         const t = this.t;
         const section = this.root.querySelector('section.create');
         section.querySelector('.choose').hidden = true;
@@ -282,14 +460,23 @@ const extension = {
         chosen.className = 'chosen';
         chosen.append(logo(connector), document.createTextNode(titleOf(context.locale, connector)));
         form.append(chosen);
-        form.append(field(t('name'), input('text', '__name', true)));
+        const name = input('text', '__name', true);
+        name.value = connection?.name ?? '';
+        form.append(field(t('name'), name));
+        const description = document.createElement('textarea');
+        description.name = '__description';
+        description.rows = 2;
+        description.maxLength = 1000;
+        description.value = connection?.description ?? '';
+        form.append(field(t('description'), description, t('descriptionHint')));
+        const values = connection?.settings ?? {};
         const schema = connector.form ?? {};
         const required = new Set(schema.required ?? []);
         for (const [name, property] of Object.entries(schema.properties ?? {})) {
           const title = property.title ?? name;
           if (property.type === 'boolean') {
             const box = input('checkbox', name, false);
-            box.checked = property.default === true;
+            box.checked = Object.hasOwn(values, name) ? values[name] === true : property.default === true;
             const label = document.createElement('label');
             label.className = 'check';
             label.append(box, document.createTextNode(title));
@@ -313,28 +500,49 @@ const extension = {
               control.step = '1';
             }
           }
-          if (property.default !== undefined) {
+          if (Object.hasOwn(values, name)) {
+            control.value = String(values[name]);
+          } else if (property.default !== undefined) {
             control.value = String(property.default);
           }
           form.append(field(required.has(name) ? `${title} (${t('required')})` : title, control, property.description));
         }
-        form.append(field(t('credential'), input('text', '__credential', false), t('credentialHint')));
+        const credential = input('text', '__credential', false);
+        credential.value = connection?.credential ?? '';
+        form.append(field(t('credential'), credential, t('credentialHint')));
+        const image = input('file', '__thumbnail', false);
+        image.accept = THUMBNAIL_TYPES;
+        form.append(field(t('thumbnail'), image, t('thumbnailHint')));
+        if (connection?.thumbnail) {
+          const remove = input('checkbox', '__removeThumbnail', false);
+          const label = document.createElement('label');
+          label.className = 'check';
+          label.append(remove, document.createTextNode(t('removeThumbnail')));
+          form.append(label);
+        }
         const actions = document.createElement('div');
         actions.className = 'actions';
         const test = button(t('test'), () => this.test(connector, form));
-        const create = button(t('create'), null, 'primary');
-        create.type = 'submit';
-        const back = button(t('back'), () => this.openCreate());
+        const submit = button(t(connection ? 'save' : 'create'), null, 'primary');
+        submit.type = 'submit';
         const cancel = button(t('cancel'), () => {
           section.hidden = true;
         });
-        actions.append(test, create, back, cancel);
+        if (connection) {
+          actions.append(test, submit, cancel);
+        } else {
+          actions.append(test, submit, button(t('back'), () => this.openCreate()), cancel);
+        }
         form.append(actions);
         form.onsubmit = (event) => {
           event.preventDefault();
-          this.create(connector, form);
+          if (connection) {
+            this.save(connector, connection, form);
+          } else {
+            this.create(connector, form);
+          }
         };
-        form.querySelector('input')?.focus();
+        name.focus();
       }
 
       /** What the form says, as the API takes it. */
@@ -354,6 +562,8 @@ const extension = {
         return {
           name: form.elements.namedItem('__name').value,
           type: connector.type,
+          // Empty clears it (EXT-015).
+          description: form.elements.namedItem('__description').value,
           settings,
           credential: form.elements.namedItem('__credential').value || null,
         };
@@ -380,12 +590,43 @@ const extension = {
             method: 'POST',
             body: JSON.stringify(this.request(connector, form)),
           });
+          await this.saveThumbnail(created, form);
           this.root.querySelector('section.create').hidden = true;
           this.status(t('created', created));
           this.loading = this.load();
           await this.loading;
         } catch (error) {
           this.status(t('failed', { message: error.message }), true);
+        }
+      }
+
+      /** Saves the changes of a connection; its type never changes. */
+      async save(connector, connection, form) {
+        const t = this.t;
+        try {
+          const { name, description, settings, credential } = this.request(connector, form);
+          const saved = await call(`/connections/${encodeURIComponent(connection.id)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ name, description, settings, credential }),
+          });
+          await this.saveThumbnail(saved, form);
+          this.root.querySelector('section.create').hidden = true;
+          this.status(t('saved', saved));
+          this.loading = this.load();
+          await this.loading;
+        } catch (error) {
+          this.status(t('failed', { message: error.message }), true);
+        }
+      }
+
+      /** Uploads the image chosen in the form as the thumbnail of a connection, or removes it. */
+      async saveThumbnail(connection, form) {
+        const file = form.elements.namedItem('__thumbnail')?.files?.[0];
+        const path = `/connections/${encodeURIComponent(connection.id)}/thumbnail`;
+        if (file) {
+          await call(path, { method: 'PUT', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file });
+        } else if (form.elements.namedItem('__removeThumbnail')?.checked) {
+          await call(path, { method: 'DELETE' });
         }
       }
 
@@ -482,6 +723,20 @@ function placeholder(connection, t, locale) {
   detail.textContent = t('unavailableDetail', { extension: connection.connector });
   absent.append(detail);
   return absent;
+}
+
+/**
+ * What a connection says under its name (EXT-015): its description, or the address of its source when
+ * it has none.
+ */
+function subtitle(connection) {
+  const text = document.createElement('p');
+  text.className = 'subtitle';
+  text.textContent = connection.description || connection.address || '';
+  if (text.textContent) {
+    text.title = text.textContent;
+  }
+  return text;
 }
 
 /** The logo of a connector, an image of its extension. */

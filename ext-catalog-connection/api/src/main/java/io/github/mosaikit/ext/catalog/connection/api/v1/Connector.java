@@ -4,6 +4,7 @@ package io.github.mosaikit.ext.catalog.connection.api.v1;
 
 import dev.mosaikit.kernel.api.contract.Contract;
 import dev.mosaikit.kernel.api.contract.ContractImplementation;
+import java.util.Optional;
 
 /**
  * A kind of data source, version 1 of the contract "connector" of the connection framework (EXT-010,
@@ -64,4 +65,19 @@ public interface Connector extends ContractImplementation {
      * @throws IllegalArgumentException when the path does not exist in the source
      */
     Page<Entry> list(ConnectionSettings settings, String path, Paging paging);
+
+    /**
+     * The address of the source of a connection with these settings, such as {@code db.example.org:5432/sales}
+     * or {@code https://api.example.org}, which the card of a connection shows under its name when it has
+     * no description (EXT-015). The framework asks for it when a connection is saved, without the
+     * credential, and keeps it with the connection, so that it is shown also while the connector is
+     * absent. The address never contains a credential.
+     *
+     * <p>Empty by default: the framework then takes it from the usual settings of a source, such as
+     * {@code url}, {@code endpoint} or {@code host} with {@code port} and {@code database}. A connector
+     * whose settings say it otherwise overrides this method.
+     */
+    default Optional<String> address(ConnectionSettings settings) {
+        return Optional.empty();
+    }
 }
