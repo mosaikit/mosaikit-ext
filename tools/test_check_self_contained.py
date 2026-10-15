@@ -4,6 +4,7 @@
 
     python -m unittest discover -s tools -v
     EXT_102_BUILD=1 python -m unittest discover -s tools -v   # also mvn verify in each extracted folder
+    EXT_102_EXTENSIONS=ext-catalog,ext-catalog-connection ... # only these folders (the CI of EXT-104)
 
 The extraction uses `git filter-repo --subdirectory-filter` on a clone of HEAD when git-filter-repo
 is installed (pip install git-filter-repo), and a copy of the folder otherwise.
@@ -189,6 +190,11 @@ class ExtractionTest(unittest.TestCase):
         """EXT-102: git filter-repo --subdirectory-filter ext-<name> keeps everything the extension needs."""
         built = [f for f in check.extensions(check.ROOT) if os.path.isfile(os.path.join(f, "pom.xml"))]
         self.assertTrue(built, "no extension has a build yet")
+        only = {n.strip() for n in os.environ.get("EXT_102_EXTENSIONS", "").split(",") if n.strip()}
+        if only:
+            built = [f for f in built if os.path.basename(f) in only]
+            self.assertEqual(sorted(os.path.basename(f) for f in built), sorted(only),
+                             "EXT_102_EXTENSIONS names a folder without a build")
         with tempfile.TemporaryDirectory(prefix="ext-102-extract-") as scratch:
             for folder in built:
                 name = os.path.basename(folder)

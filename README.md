@@ -47,7 +47,13 @@ path that leaves the folder, a Markdown link to the root, an npm dependency on a
 workspace, a POM that looks for its parent in `../pom.xml`, a link outside the folder, or a folder
 with a build that lacks its manifest, changelog, requirements or tests. Its tests,
 `python -m unittest discover -s tools -v`, also extract every folder with a build as a repository of
-its own; with `EXT_102_BUILD=1` they run `mvn verify` there.
+its own; with `EXT_102_BUILD=1` they run `mvn verify` there, and `EXT_102_EXTENSIONS=ext-a,ext-b`
+limits them to those folders.
+
+The CI of a pull request builds only the extensions it changes and those that require or optionally
+use them, transitively, as their manifests declare; a change to a file of the root (CI, shared
+requirements, tools) builds every extension. `python tools/affected.py select --base origin/main`
+prints that set (EXT-104).
 
 ### Moving an extension to a repository of its own
 
