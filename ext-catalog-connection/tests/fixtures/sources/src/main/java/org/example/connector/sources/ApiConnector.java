@@ -6,6 +6,7 @@ import io.github.mosaikit.ext.catalog.connection.api.v1.ConnectionSettings;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Connector;
 import io.github.mosaikit.ext.catalog.connection.api.v1.ContentsUnavailableException;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Declaration;
+import io.github.mosaikit.ext.catalog.connection.api.v1.Inspection;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Page;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Paging;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Piece;
@@ -70,5 +71,18 @@ public class ApiConnector implements Connector {
             throw new IllegalArgumentException("An endpoint holds no pieces");
         }
         return new Page<>(ENDPOINTS, false);
+    }
+
+    /** The response of an endpoint (EXT-018): JSON records for the customers, CSV for the orders. */
+    @Override
+    public Inspection inspect(ConnectionSettings settings, String piece) {
+        if (UNDECLARED.equals(settings.text("url").orElse(""))) {
+            throw ContentsUnavailableException.needsDeclaration("The API publishes no description of its endpoints.");
+        }
+        return switch (piece) {
+            case "GET /customers" -> new Inspection("application/json", List.of("[{\"id\":1,\"name\":\"Acme\",\"active\":true},{\"id\":2,\"name\":\"Green\",\"active\":false}]"));
+            case "GET /orders" -> new Inspection("text/csv", List.of("id,customer,total\n1,1,10.5\n2,2,7"));
+            default -> throw new IllegalArgumentException("No such endpoint: " + piece);
+        };
     }
 }

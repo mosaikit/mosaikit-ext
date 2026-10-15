@@ -7,14 +7,18 @@ import io.github.mosaikit.ext.catalog.connection.api.v1.ConnectionSettings;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Connector;
 import io.github.mosaikit.ext.catalog.connection.api.v1.ContentsUnavailableException;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Declaration;
+import io.github.mosaikit.ext.catalog.connection.api.v1.Inspection;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Page;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Paging;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Piece;
 import io.github.mosaikit.ext.catalog.connection.api.v1.TestResult;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.Set;
 
 /**
@@ -42,14 +46,30 @@ public class SampleConnector implements Connector {
                     table("sales/customers", "customers", List.of(new Column("id", "integer"), new Column("name", "text"))),
                     table("sales/orders", "orders", List.of(new Column("id", "integer"), new Column("total", "numeric")))),
             "places",
-            List.of(new Piece(
-                    "places/sites",
-                    "sites",
-                    "table",
-                    false,
-                    Map.of(
-                            Piece.Facts.COLUMNS, List.of(new Column("name", "text"), new Column("location", "geometry")),
-                            Piece.Facts.GEOMETRY, List.of("location")))));
+            List.of(
+                    new Piece(
+                            "places/sites",
+                            "sites",
+                            "table",
+                            false,
+                            Map.of(
+                                    Piece.Facts.COLUMNS, List.of(new Column("name", "text"), new Column("location", "geometry")),
+                                    Piece.Facts.GEOMETRY, List.of("location"))),
+                    // Its column position is text: only reading its rows shows that it holds coordinates (EXT-018).
+                    table("places/stores", "stores", List.of(new Column("name", "text"), new Column("position", "text")))));
+
+    /** The first rows of each table, as JSON, which inspecting a table reads (EXT-018). */
+    static final Map<String, String> ROWS = Map.of(
+            "sales/customers", "[{\"id\":1,\"name\":\"Acme\"},{\"id\":2,\"name\":\"Green\"}]",
+            "sales/orders", "[{\"id\":1,\"total\":10.5},{\"id\":2,\"total\":7}]",
+            "places/sites", "[{\"name\":\"North\",\"location\":\"POINT(7.68 45.07)\"}]",
+            "places/stores", "[{\"name\":\"Centre\",\"position\":\"45.0703 7.6869\"},{\"name\":\"Station\",\"position\":\"45.0621 7.6782\"}]");
+
+    /** A value made of a latitude and a longitude, as some tables keep coordinates in text. */
+    static final Pattern COORDINATES = Pattern.compile("-?\\d{1,2}\\.\\d+[ ,;]+-?\\d{1,3}\\.\\d+");
+
+    /** A field of a JSON object with a text value. */
+    static final Pattern TEXT_FIELD = Pattern.compile("\"(\\w+)\":\"([^\"]*)\"");
 
     private static Piece table(String id, String name, List<Column> columns) {
         return new Piece(id, name, "table", false, Map.of(Piece.Facts.COLUMNS, columns));
@@ -92,6 +112,36 @@ public class SampleConnector implements Connector {
             return TestResult.failed(host + " refused the credential");
         }
         return TestResult.succeeded("Connected to " + host + (settings.credential().isPresent() ? " with the credential" : ""));
+    }
+
+    /**
+     * Reads the first rows of a table (EXT-018), and finds the text columns whose values are coordinates:
+     * a fact {@code geometry} that the declaration of the table does not have.
+     */
+    @Override
+    public Inspection inspect(ConnectionSettings settings, String piece) {
+        String host = settings.text("host").orElse("");
+        if (UNREACHABLE.equals(host)) {
+            throw ContentsUnavailableException.unreachable(host + " does not answer");
+        }
+        String rows = ROWS.get(piece);
+        if (rows == null) {
+            if (CONTENTS.containsKey(piece) || "archive".equals(piece)) {
+                throw ContentsUnavailableException.notReadable("A schema or a folder holds pieces: inspect them one by one.");
+            }
+            throw new IllegalArgumentException("No such piece: " + piece);
+        }
+        List<String> coordinates = new ArrayList<>();
+        Matcher found = TEXT_FIELD.matcher(rows);
+        while (found.find()) {
+            if (COORDINATES.matcher(found.group(2)).matches() && !coordinates.contains(found.group(1))) {
+                coordinates.add(found.group(1));
+            }
+        }
+        return new Inspection(
+                "application/json",
+                List.of(rows),
+                coordinates.isEmpty() ? Map.of() : Map.of(Piece.Facts.GEOMETRY, coordinates));
     }
 
     @Override

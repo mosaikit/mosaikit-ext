@@ -18,6 +18,7 @@ import io.github.mosaikit.ext.catalog.connection.api.v1.ConnectionSettings;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Connector;
 import io.github.mosaikit.ext.catalog.connection.api.v1.ContentsUnavailableException;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Declaration;
+import io.github.mosaikit.ext.catalog.connection.api.v1.Inspection;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Page;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Paging;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Piece;
@@ -151,7 +152,55 @@ public class ConnectionResource {
      * @param contents the first pieces at the top level of the source when it answered, or why there
      *     are none
      */
-    public record Preview(boolean success, String message, String address, ContentsView contents) {}
+    public record Preview(
+            boolean success, String message, String address, ContentsView contents, List<InspectionView> inspections) {}
+
+    /** The pieces of the top level that a preview inspects. */
+    static final int PREVIEW_INSPECTIONS = 3;
+
+    /** The samples an inspection shows, and the most characters of each. */
+    static final int SAMPLES = 5;
+
+    static final int SAMPLE_LENGTH = 2000;
+
+    /**
+     * What looking at a piece found (EXT-018).
+     *
+     * @param piece the id of the piece
+     * @param state {@code inspected}, or why it could not be: {@code unreachable}, {@code
+     *     needs-declaration} or {@code not-readable}, each with its own message in the app
+     * @param detail what the source or the connector said, when it could not be inspected
+     * @param mediaType the media type of the samples, when the source says it
+     * @param shape the shape of the samples, classified by the framework ({@link Shapes})
+     * @param samples the first samples, cut to {@value #SAMPLE_LENGTH} characters
+     * @param facts the facts of the shape and those the connector found, which come first
+     */
+    public record InspectionView(
+            String piece,
+            String state,
+            String detail,
+            String mediaType,
+            String shape,
+            List<String> samples,
+            Map<String, Object> facts) {
+
+        static InspectionView of(String piece, Inspection inspection) {
+            Shapes.Found found = Shapes.classify(inspection.mediaType(), inspection.samples());
+            Map<String, Object> facts = new java.util.LinkedHashMap<>(found.facts());
+            facts.put(Piece.Facts.SHAPE, found.shape());
+            facts.putAll(inspection.facts());
+            List<String> samples = inspection.samples().stream()
+                    .limit(SAMPLES)
+                    .map(sample -> sample.length() > SAMPLE_LENGTH ? sample.substring(0, SAMPLE_LENGTH) + "…" : sample)
+                    .toList();
+            return new InspectionView(piece, "inspected", null, inspection.mediaType(), found.shape(), samples, facts);
+        }
+
+        static InspectionView unavailable(String piece, ContentsUnavailableException e) {
+            return new InspectionView(
+                    piece, ContentsView.unavailable(piece, e).state(), e.getMessage(), null, null, List.of(), Map.of());
+        }
+    }
 
     /**
      * Request to change a connection, whose type never changes: its name, its description (empty or
@@ -566,7 +615,7 @@ public class ConnectionResource {
         String address = Addresses.of(found.connector(), values).orElse(null);
         TestResult result = test(found.connector(), values, credential);
         if (!result.success()) {
-            return new Preview(false, result.message(), address, null);
+            return new Preview(false, result.message(), address, null, List.of());
         }
         ContentsView contents = withSettings(values, credential, settings -> {
             try {
@@ -575,7 +624,41 @@ public class ConnectionResource {
                 return ContentsView.unavailable("", e);
             }
         });
-        return new Preview(true, result.message(), address, contents);
+        // The first pieces that hold data, such as endpoints and topics, are looked at (EXT-018).
+        List<InspectionView> inspections = contents.items().stream()
+                .filter(piece -> !piece.container())
+                .limit(PREVIEW_INSPECTIONS)
+                .map(piece -> inspect(found.connector(), values, credential, piece.id()))
+                .toList();
+        return new Preview(true, result.message(), address, contents, inspections);
+    }
+
+    /**
+     * Looks at a piece of a connection that the person uses (EXT-018): a sample of what it holds, its
+     * shape, and the facts found in it, or why it cannot be looked at.
+     */
+    @GET
+    @Path("connections/{id}/inspection")
+    @Transactional
+    public InspectionView inspection(@PathParam("id") UUID id, @QueryParam("piece") String piece) {
+        if (piece == null || piece.isEmpty()) {
+            throw problem(Response.Status.BAD_REQUEST, "The piece to inspect is required");
+        }
+        Connection connection = find(id, USE);
+        Connector connector = available(connection, catalog.discover()).connector();
+        return inspect(connector, connection.getSettings(), connection.getCredential(), piece);
+    }
+
+    private InspectionView inspect(Connector connector, Map<String, Object> values, String credential, String piece) {
+        return withSettings(values, credential, settings -> {
+            try {
+                return InspectionView.of(piece, connector.inspect(settings, piece));
+            } catch (ContentsUnavailableException e) {
+                return InspectionView.unavailable(piece, e);
+            } catch (IllegalArgumentException e) {
+                throw problem(Response.Status.NOT_FOUND, "No such piece in the source: " + piece);
+            }
+        });
     }
 
     /** Tests a connection that the person uses, with its settings and credential. */

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Massimo Antonini
 // SPDX-License-Identifier: MPL-2.0
-import { categoryName, contributionText, kindName, titleOf, translator } from './i18n.js';
+import { categoryName, contributionText, kindName, shapeName, titleOf, translator } from './i18n.js';
 import { LIST_STYLE, ListPage } from './list.js';
 import { definePicker, PICKER_STYLE } from './picker.js';
 import { generatedThumbnail } from './thumbnail.js';
@@ -125,6 +125,13 @@ const STYLE = `
   ul.entries > li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; padding: 6px 0;
                     border-bottom: 1px solid var(--mk-line); }
   ul.entries .kind { color: var(--mk-muted); font-size: 12px; display: inline; }
+  ul.entries .inspection { flex-basis: 100%; display: grid; gap: 2px; font-size: 12px; color: var(--mk-muted); }
+  ul.entries .inspection[data-state='unreachable'] { color: var(--mk-danger); }
+  ul.entries .inspection .shape { color: var(--mk-fg); }
+  ul.entries .inspection summary { cursor: pointer; }
+  ul.entries pre.sample { margin: 2px 0 0; padding: 6px 8px; max-height: 8em; overflow: auto; white-space: pre-wrap;
+                          overflow-wrap: anywhere; background: var(--mk-bg); border: 1px solid var(--mk-line);
+                          border-radius: var(--mk-radius); font-family: var(--mk-font-mono, monospace); color: var(--mk-fg); }
   ul.entries .columns { flex-basis: 100%; color: var(--mk-muted); font-size: 12px; overflow-wrap: anywhere; }
   ul.uses { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 0 auto; padding: 0; }
   ul.uses li { font-size: 12px; padding: 1px 8px; border: 1px solid var(--mk-line); border-radius: 999px;
@@ -1408,6 +1415,8 @@ const extension = {
         }
         const list = document.createElement('ul');
         list.className = 'entries';
+        // What the test looked at in the first pieces that hold data (EXT-018).
+        const inspections = new Map((result.inspections ?? []).map((inspection) => [inspection.piece, inspection]));
         list.append(
           ...contents.items.map((piece) => {
             const item = document.createElement('li');
@@ -1419,6 +1428,11 @@ const extension = {
             kind.className = 'kind';
             kind.textContent = kindName(context.locale, piece.kind);
             item.append(name, kind);
+            const inspection = inspections.get(piece.id);
+            if (inspection) {
+              item.dataset.inspected = inspection.state;
+              item.append(this.inspectionOf(inspection));
+            }
             return item;
           }),
         );
@@ -1551,6 +1565,9 @@ const extension = {
             state.hidden = false;
           }
           browsing.offset = offset + page.items.length;
+          if (!this.picking) {
+            this.inspectAll(connection, trail, page.items.filter((piece) => !piece.container), uses, browsing);
+          }
           if (trail.length === 0 && offset === 0) {
             // The listing measured the source: its card says so (EXT-014).
             this.refresh(connection.id);
@@ -1561,8 +1578,66 @@ const extension = {
         }
       }
 
+      /**
+       * Looks at the pieces that hold data, one after the other (EXT-018): each shows a sample of what it
+       * holds and its shape, or why it cannot be looked at, and offers the uses that the facts found
+       * allow.
+       */
+      async inspectAll(connection, trail, pieces, uses, browsing) {
+        const list = this.root.querySelector('section.contents ul.entries');
+        for (const piece of pieces.slice(0, INSPECTED)) {
+          let inspection;
+          try {
+            inspection = await call(
+              `/connections/${encodeURIComponent(connection.id)}/inspection?piece=${encodeURIComponent(piece.id)}`,
+            );
+          } catch {
+            continue;
+          }
+          if (this.browsing !== browsing) {
+            return;
+          }
+          const shown = list.querySelector(`:scope > li[data-id="${CSS.escape(piece.id)}"]`);
+          const item = this.pieceItem(connection, trail, withFacts(piece, inspection), uses, inspection);
+          if (shown && item) {
+            shown.replaceWith(item);
+          }
+        }
+      }
+
+      /**
+       * What looking at a piece found (EXT-018): the shape of what it holds and a sample of it, or why it
+       * cannot be looked at.
+       */
+      inspectionOf(inspection) {
+        const t = this.t;
+        const found = document.createElement('div');
+        found.className = 'inspection';
+        found.dataset.state = inspection.state;
+        if (inspection.state !== 'inspected') {
+          const why = document.createElement('span');
+          why.className = 'why';
+          why.textContent = t(INSPECTION_MESSAGES[inspection.state] ?? 'inspectNotReadable', { detail: inspection.detail ?? '' }).trim();
+          found.append(why);
+          return found;
+        }
+        const shape = document.createElement('span');
+        shape.className = 'shape';
+        shape.dataset.shape = inspection.shape;
+        shape.textContent = t('shape', { shape: shapeName(context.locale, inspection.shape) });
+        const sample = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = t('sample');
+        const text = document.createElement('pre');
+        text.className = 'sample';
+        text.textContent = inspection.samples.join('\n');
+        sample.append(summary, text);
+        found.append(shape, sample);
+        return found;
+      }
+
       /** A piece: its name (which opens it when it is a container), its kind, its uses and its columns. */
-      pieceItem(connection, trail, piece, uses) {
+      pieceItem(connection, trail, piece, uses, inspection = null) {
         const t = this.t;
         const item = document.createElement('li');
         item.dataset.id = piece.id;
@@ -1615,6 +1690,10 @@ const extension = {
           }
           line.textContent = t('columns', { list: shown.join(', ') });
           item.append(line);
+        }
+        if (inspection) {
+          item.dataset.inspected = inspection.state;
+          item.append(this.inspectionOf(inspection));
         }
         return item;
       }
@@ -1688,6 +1767,24 @@ function proposedName(address, type, settings) {
 /** The key of a piece of a connection among those chosen in the picker. */
 function pickKey(connection, piece) {
   return `${connection} ${piece}`;
+}
+
+/** The most pieces of a page that the detail looks at (EXT-018). */
+const INSPECTED = 20;
+
+/** The message of each reason why a piece cannot be looked at (EXT-018). */
+const INSPECTION_MESSAGES = {
+  unreachable: 'inspectUnreachable',
+  'needs-declaration': 'inspectNeedsDeclaration',
+  'not-readable': 'inspectNotReadable',
+};
+
+/**
+ * A piece with the facts that looking at it found (EXT-018): they add to those its connector listed,
+ * which stay as they are.
+ */
+function withFacts(piece, inspection) {
+  return inspection.state === 'inspected' ? { ...piece, facts: { ...inspection.facts, ...piece.facts } } : piece;
 }
 
 /** The text of each status of a connection on its card (EXT-014). */

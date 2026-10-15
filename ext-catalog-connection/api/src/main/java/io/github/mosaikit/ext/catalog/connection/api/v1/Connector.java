@@ -81,6 +81,25 @@ public interface Connector extends ContractImplementation {
     }
 
     /**
+     * Looks at a piece of a source (EXT-018): reads a sample of what it holds, such as the response of
+     * an endpoint, the first messages of a topic or the first rows of a table, and tells the facts it
+     * finds in it, such as a column holding coordinates ({@value Piece.Facts#GEOMETRY}). The framework
+     * shows the sample with its shape on the connection step and in the detail of a connection, and
+     * offers on the piece the uses its facts allow. It reads only, and as little as a sample needs.
+     *
+     * <p>By default a connector cannot inspect its pieces yet ({@link
+     * ContentsUnavailableException.Reason#NOT_READABLE}), which the framework says instead of a sample.
+     *
+     * @param piece the id of a piece that {@link #list} returned
+     * @throws IllegalArgumentException when the piece does not exist in the source
+     * @throws ContentsUnavailableException when the source does not answer, does not describe the piece,
+     *     or holds a kind the connector cannot read yet; each is told apart to the person
+     */
+    default Inspection inspect(ConnectionSettings settings, String piece) {
+        throw ContentsUnavailableException.notReadable("This connector cannot inspect the pieces of its sources yet");
+    }
+
+    /**
      * The kinds of pieces that the sources of this connector hold, such as {@code schema}, {@code table}
      * and {@code view} (EXT-026): the source picker of the framework offers a type only to the editors
      * whose uses take one of its kinds.
