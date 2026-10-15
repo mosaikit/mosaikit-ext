@@ -8,6 +8,14 @@ and the versions [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sharing of folders and files (EXT-003) in the sharing dialog of the platform, with people, groups,
+  the organization or a link, at the levels read, edit and manage: a share on a folder counts on
+  everything it holds, also on what is added later, and a share removed stops counting at the next
+  request. Shared with me (`/app/catalog?view=shared`, `GET /api/v1/ext/catalog/shared`) lists what
+  others shared with the person outside the folders they read; who has access to a folder or a file,
+  and through which share (on the item or inherited from which folder), is shown below the list and
+  answered by `GET /api/v1/ext/catalog/items/{id}/access`. The root of the files lists only the
+  items at the root of the organization.
 - Folders and sub-folders of an organization (EXT-001): a Java backend with the schema `ext_catalog`,
   where folders and files are items registered with the kernel as resources of the types `folder`
   and `file` (levels read, edit, manage); a level on a folder counts on what it holds. The app shows

@@ -6,14 +6,20 @@ import { translator } from './i18n.js';
  * Frontend of the catalog (EXT-001): a custom element that the shell renders for /app/catalog. The
  * tree of folders is on the left, the content of the open folder in the middle, its path above as
  * breadcrumbs. The open folder is in the address (/app/catalog?folder=<id>), so it can be linked and
- * the back button of the browser works. Styled with the --mk-* tokens of the theme, in the language of
- * the person.
+ * the back button of the browser works; Shared with me is at /app/catalog?view=shared (EXT-003). Below
+ * the content, who has access to the open folder or to the item chosen in the list, and through which
+ * share; sharing itself happens in the sharing dialog of the platform (MK-055). Styled with the --mk-*
+ * tokens of the theme, in the language of the person.
  */
 
 const ELEMENT = 'mosaikit-ext-catalog';
 const API = '/api/v1/ext/catalog/folders';
+const SHARED_API = '/api/v1/ext/catalog/shared';
+const ITEMS_API = '/api/v1/ext/catalog/items';
 const ROUTE = '/app/catalog';
 const ROOT = 'root';
+/** The view Shared with me, where a folder id would be: never the id of a folder. */
+const SHARED = 'shared';
 
 const ICONS = {
   folder:
@@ -57,6 +63,13 @@ const STYLE = `
   td.name { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
   td.name svg { color: var(--mk-muted); flex: none; }
   td.num { white-space: nowrap; }
+  td button.sharing { border: 0; background: none; padding: 0; color: var(--mk-accent); text-align: left; }
+  section.access { margin-top: 16px; border-top: 1px solid var(--mk-line); padding-top: 12px; }
+  section.access h2 { margin: 0 0 4px; font-size: 16px; overflow-wrap: anywhere; }
+  section.access ul { list-style: none; margin: 8px 0; padding: 0; }
+  section.access li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 0; border-bottom: 1px solid var(--mk-line); }
+  section.access li .who { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+  section.access li .via { color: var(--mk-muted); }
   [role='status'] { min-height: 1.2em; margin: 0 0 8px; color: var(--mk-muted); }
   [role='status'].error { color: var(--mk-danger); }
   [hidden] { display: none !important; }
@@ -135,6 +148,12 @@ const extension = {
                 <p class="muted"></p>
                 <p><a class="back"></a></p>
               </div>
+              <section class="access" aria-labelledby="access-title" hidden>
+                <h2 id="access-title"></h2>
+                <ul></ul>
+                <p class="muted admins"></p>
+                <button type="button" class="share"></button>
+              </section>
             </section>
           </div>
           <p class="version"></p>`;
@@ -160,6 +179,18 @@ const extension = {
         $('.not-found a.back').textContent = t('backToRoot');
         $('.not-found a.back').href = ROUTE;
         $('.not-found a.back').addEventListener('click', (event) => this.follow(event, null));
+        $('section.access ul').setAttribute('aria-label', t('whoHasAccess'));
+        $('section.access .admins').textContent = t('admins');
+        $('section.access button.share').textContent = t('share');
+        $('section.access button.share').addEventListener('click', () => this.share());
+        // The sharing dialog of the shell gives the focus back to the Share button when it closes: then
+        // the list and who has access show what changed in it.
+        root.addEventListener('focusin', () => {
+          if (this.sharingOpen) {
+            this.sharingOpen = false;
+            void this.refresh();
+          }
+        });
 
         const form = $('form.create');
         $('button.new').addEventListener('click', () => {
@@ -188,13 +219,15 @@ const extension = {
         }
       }
 
-      /** Opens a folder, or the root when id is null, and shows it in the address. */
+      /** Opens a folder, the root when id is null, or Shared with me, and shows it in the address. */
       async open(id, { push = true } = {}) {
         if (push) {
-          history.pushState(null, '', id ? `${ROUTE}?folder=${encodeURIComponent(id)}` : ROUTE);
+          history.pushState(null, '', address(id));
         }
         const query = `sort=${this.sort}&order=${this.order}`;
-        const response = await context.fetch(id ? `${API}/${encodeURIComponent(id)}?${query}` : `${API}?${query}`);
+        const url =
+          id === SHARED ? `${SHARED_API}?${query}` : id ? `${API}/${encodeURIComponent(id)}?${query}` : `${API}?${query}`;
+        const response = await context.fetch(url);
         if (response.status === 404) {
           this.current = null;
           this.showNotFound();
@@ -206,13 +239,113 @@ const extension = {
           return;
         }
         const folder = await response.json();
+        if (id === SHARED) {
+          folder.id = SHARED;
+          folder.name = this.t('sharedWithMe');
+          folder.path = [{ id: SHARED, name: folder.name }];
+        } else {
+          this.tree.set(folder.id ?? ROOT, foldersOf(folder.items));
+        }
         this.current = folder;
-        this.tree.set(folder.id ?? ROOT, foldersOf(folder.items));
         for (const step of folder.path) {
-          this.expanded.add(step.id);
+          if (step.id !== SHARED) {
+            this.expanded.add(step.id);
+          }
         }
         this.showFolder(folder);
         await this.renderTree();
+        // An open folder shows who has access to it; the root and Shared with me show it for the item
+        // chosen in the list.
+        if (folder.id && folder.id !== SHARED) {
+          await this.showAccess(folder.id);
+        } else {
+          this.hideAccess();
+        }
+      }
+
+      /** Loads the open view again, and who has access to the item shown, after a change of sharing. */
+      async refresh() {
+        const shown = this.access?.id;
+        await this.open(this.current?.id ?? null, { push: false });
+        if (shown && shown !== this.access?.id) {
+          await this.showAccess(shown);
+        }
+      }
+
+      /** Shows who has access to an item, and through which share. */
+      async showAccess(id) {
+        const response = await context.fetch(`${ITEMS_API}/${encodeURIComponent(id)}/access`);
+        if (!response.ok) {
+          this.hideAccess();
+          return;
+        }
+        const access = await response.json();
+        this.access = access;
+        const t = this.t;
+        const $ = this.$;
+        $('section.access').hidden = false;
+        $('#access-title').textContent = t('access', { name: access.name });
+        $('section.access ul').replaceChildren(...access.entries.map((entry) => this.accessEntry(entry)));
+        $('section.access button.share').hidden = !access.canShare;
+        $('section.access button.share').setAttribute('aria-label', t('shareItem', { name: access.name }));
+      }
+
+      hideAccess() {
+        this.access = null;
+        this.$('section.access').hidden = true;
+      }
+
+      accessEntry(entry) {
+        const t = this.t;
+        const li = document.createElement('li');
+        const who = document.createElement('span');
+        who.className = 'who';
+        who.textContent = this.who(entry.who);
+        const level = document.createElement('span');
+        level.className = 'level';
+        level.textContent = t(`level_${entry.level}`);
+        const via = document.createElement('span');
+        via.className = 'via';
+        if (entry.from) {
+          // Inherited from a folder above: its name opens it.
+          const [before, after] = t(entry.via === 'owner' ? 'ownerOf' : 'through').split('{folder}');
+          via.append(before ?? '', this.link(entry.from.id, entry.from.name), after ?? '');
+        } else {
+          via.textContent = t(entry.via === 'owner' ? 'owner' : 'direct');
+        }
+        li.append(who, level, via);
+        return li;
+      }
+
+      /** Who an entry of the access is for, in words. */
+      who(who) {
+        const t = this.t;
+        switch (who.kind) {
+          case 'person':
+            return who.name && who.email ? `${who.name} (${who.email})` : (who.name ?? who.email ?? t('somebody'));
+          case 'group':
+            return t('team', { name: who.name ?? '' });
+          case 'organization':
+            return t('everyoneInOrganization');
+          case 'link':
+            return t('anyoneWithLink', { date: who.expires ? this.dates.format(new Date(who.expires)) : '' });
+          default:
+            return t('everyone');
+        }
+      }
+
+      /** Opens the sharing dialog of the platform for the item whose access is shown (MK-055). */
+      share() {
+        const access = this.access;
+        if (!access) {
+          return;
+        }
+        context.events.publish('shell.share', { extension: context.extension.id, type: access.kind, id: access.id });
+        // Set after the click, whose focus is already on the button: the next focus in the app is the
+        // one the dialog gives back when it closes.
+        setTimeout(() => {
+          this.sharingOpen = true;
+        }, 0);
       }
 
       /** Follows a link of the app without leaving the page. */
@@ -226,7 +359,7 @@ const extension = {
 
       link(id, name) {
         const a = document.createElement('a');
-        a.href = id ? `${ROUTE}?folder=${encodeURIComponent(id)}` : ROUTE;
+        a.href = address(id);
         a.textContent = name;
         a.addEventListener('click', (event) => this.follow(event, id));
         return a;
@@ -251,7 +384,7 @@ const extension = {
         }
         $('tbody').replaceChildren(...folder.items.map((item) => this.row(item)));
         $('.empty').hidden = folder.items.length > 0;
-        $('.empty').textContent = folder.id ? t('empty') : t('emptyRoot');
+        $('.empty').textContent = folder.id === SHARED ? t('emptyShared') : folder.id ? t('empty') : t('emptyRoot');
       }
 
       row(item) {
@@ -277,7 +410,14 @@ const extension = {
         time.textContent = this.dates.format(new Date(item.changed));
         changed.append(time);
         const scope = t(`scope_${item.sharing.scope}`);
-        const sharing = cell(item.sharing.inherited ? t('inherited', { scope }) : scope);
+        const sharing = document.createElement('td');
+        const who = document.createElement('button');
+        who.type = 'button';
+        who.className = 'sharing';
+        who.textContent = item.sharing.inherited ? t('inherited', { scope }) : scope;
+        who.setAttribute('aria-label', t('access', { name: item.name }));
+        who.addEventListener('click', () => void this.showAccess(item.id));
+        sharing.append(who);
         tr.append(name, size, owner, changed, sharing);
         return tr;
       }
@@ -302,7 +442,8 @@ const extension = {
 
       renderCrumbs(path) {
         const list = this.$('nav.crumbs ol');
-        const steps = [{ id: null, name: this.t('root') }, ...path];
+        // Shared with me is not under the files of the organization.
+        const steps = path[0]?.id === SHARED ? path : [{ id: null, name: this.t('root') }, ...path];
         list.replaceChildren(
           ...steps.map((step, index) => {
             const li = document.createElement('li');
@@ -323,6 +464,7 @@ const extension = {
         $('button.new').hidden = true;
         $('form.create').hidden = true;
         $('.not-found').hidden = false;
+        this.hideAccess();
         this.renderCrumbs([]);
         this.say('');
       }
@@ -340,7 +482,9 @@ const extension = {
         const top = document.createElement('li');
         top.append(this.treeRow({ id: null, name: this.t('root') }, false));
         top.append(this.branch(ROOT));
-        this.$('nav.tree > ul').replaceChildren(top);
+        const shared = document.createElement('li');
+        shared.append(this.treeRow({ id: SHARED, name: this.t('sharedWithMe') }, false));
+        this.$('nav.tree > ul').replaceChildren(top, shared);
       }
 
       /** Loads the sub-folders of a folder for the tree, by name. */
@@ -432,9 +576,18 @@ const extension = {
   },
 };
 
-/** The folder in the address of the page, or null for the root. */
+/** The folder in the address of the page, SHARED for Shared with me, or null for the root. */
 function folderInAddress() {
-  return new URL(location.href).searchParams.get('folder');
+  const parameters = new URL(location.href).searchParams;
+  return parameters.get('view') === SHARED ? SHARED : parameters.get('folder');
+}
+
+/** The address of a folder, of the root (null) or of Shared with me (SHARED). */
+function address(id) {
+  if (id === SHARED) {
+    return `${ROUTE}?view=${SHARED}`;
+  }
+  return id ? `${ROUTE}?folder=${encodeURIComponent(id)}` : ROUTE;
 }
 
 /** The sub-folders of a list of items, by name, for the tree. */

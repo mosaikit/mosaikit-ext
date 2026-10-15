@@ -38,11 +38,41 @@ does not exist.
 
 | Request | What it does |
 |---|---|
-| `GET /api/v1/ext/catalog/folders` | the root of the person: the items at the root they read, and those shared with them whose folder they cannot read |
+| `GET /api/v1/ext/catalog/folders` | the root of the person: the items at the root of the organization that they read |
+| `GET /api/v1/ext/catalog/shared` | Shared with me: what someone else shared with the person, a group of theirs or the organization, outside the folders they read; same `sort` and `order` |
+| `GET /api/v1/ext/catalog/items/{id}/access` | who has access to a folder or a file and through which share, the `level` of the person and `canShare`; `404` when the person cannot read it |
 | `GET /api/v1/ext/catalog/folders/{id}` | a folder with its `path`, the `level` of the person, `canCreate` and its `items`; `404` when it does not exist or the person cannot read it |
 | `?sort=name\|changed&order=asc\|desc` | the order of the items, folders first: by name ascending, or by date newest first, by default |
 | `POST /api/v1/ext/catalog/folders` | creates a folder, `{ "name", "parent" }`: at the root for the members of the organization, in a folder with the level `edit`; `409` when the folder already holds an item of that name, in any case |
 | `POST /api/v1/ext/catalog/folders/{id}/files?name=<name>` | stores the body as a file of the folder, with its `Content-Type`, through the file service of the kernel |
+
+## Sharing
+
+A folder or a file is shared in the sharing dialog of the platform (MK-055), with a person, a group,
+the whole organization or a link, at the levels `read`, `edit` and `manage`; the app opens it with
+the Share button of who has access. A share on a folder counts on everything the folder holds, at any
+depth, also on what is added to it later: the catalog adds this inheritance to the kernel at every
+request, so a share that is removed stops counting at the next request of the person.
+
+Next to the files of the organization each person has **Shared with me**
+(`/app/catalog?view=shared`): the folders and files that someone else shared with them, a group of
+theirs or the organization and that are not inside a folder they read already. A shared folder opens
+with everything it holds; a file shared alone shows nothing else of its folder.
+
+Below the content of the open folder, or for the item whose sharing state is chosen in the list, the
+app shows **who has access** and through which share: the owner and the grants of the item itself,
+then those of each folder above it that the person reads, with the folder they come from. The
+administrators of the organization reach everything and are not listed.
+
+The kernel does not know that a share on a folder covers its content (MK-055, "no inheritance from
+the parent, for now"). What the catalog answers follows the folders; what the kernel answers on an
+item reached only through a folder above does not, until the platform passes grants from a parent
+resource to its children: the sharing dialog lets a person share an item only with a level on the
+item itself (`canShare`), and the file service, its signed links and search refuse a file to a person
+who reaches it only through its folder.
+
+The dialog also makes links, which the access lists with their expiry; the catalog does not yet
+contribute the page that shows a folder or a file opened through a link (`shared.view`).
 
 ## Build and test
 
