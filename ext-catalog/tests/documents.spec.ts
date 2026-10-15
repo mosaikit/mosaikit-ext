@@ -313,7 +313,7 @@ test('EXT-006 a document shared with a group is downloaded by its members throug
   expect(Date.parse(signed.expires) - before).toBeLessThanOrEqual(3_000);
   const url = signed.entries[0]!.url!;
   expect(await fetchLink(url)).toEqual({ status: 200, text: 'the minutes of the board' });
-  expect((await fetchLink(url.replace(/.$/, (last) => (last === 'A' ? 'B' : 'A')))).status).toBe(404);
+  expect((await fetchLink(altered(url))).status).toBe(404);
   await expect.poll(async () => (await fetchLink(url)).status, { timeout: 15_000, intervals: [1_000] }).toBe(404);
 
   // Outside the group: not found by the search, its sheet and its download not found.
@@ -405,3 +405,16 @@ test.describe('a record whose extension is turned off', () => {
     await admin.close();
   });
 });
+
+/**
+ * The link with the last character of its signature changed in a bit that carries data: in base64url
+ * the last character of a signature may hold padding bits in its low bits, so flipping those (A and B)
+ * would give the same signature.
+ */
+function altered(url: string): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  return url.replace(/.$/, (last) => {
+    const index = alphabet.indexOf(last);
+    return index < 0 ? (last === 'A' ? 'B' : 'A') : alphabet[index ^ 32]!;
+  });
+}

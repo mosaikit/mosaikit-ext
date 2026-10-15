@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MPL-2.0
 #
 # Checks of the repository: the requirements (schema, ids, dependencies, also on the requirements
-# of Mosaikit) and the licence information of every file (REUSE). Actions are pinned by commit.
+# of Mosaikit), the licence information of every file (REUSE), and that every extension folder is
+# self-contained and builds alone once extracted (EXT-102). Actions are pinned by commit.
 
 name: CI
 
@@ -41,3 +42,35 @@ jobs:
           rm -rf .mosaikit
           python3 -m pip install --quiet reuse
           python3 -m reuse lint
+
+  # EXT-102 (ADR-0001): no file of an extension refers to a file outside its folder, and every folder
+  # with a build, extracted with git filter-repo as a repository of its own, builds and passes its tests
+  # on the latest snapshot of Mosaikit.
+  extensions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Self-contained folders
+        run: python3 tools/check_self_contained.py
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Parent of extensions and extension API
+        uses: mosaikit/.github/actions/kernel-api@be624e6d388bec34c10b6d36d52839de0ae22470 # main
+        with:
+          version: 0.1.0-SNAPSHOT
+      - run: npx --yes playwright@1 install --with-deps chromium
+      - name: Extracted folders build and pass their tests
+        env:
+          EXT_102_BUILD: '1'
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python3 -m pip install --quiet git-filter-repo==2.47.0 pyyaml
+          python3 -m unittest discover -s tools -v

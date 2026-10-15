@@ -3,11 +3,13 @@
 """Tests of EXT-102: every extension folder is self-contained, and an extracted folder builds alone.
 
     python -m unittest discover -s tools -v
-    EXT_102_BUILD=1 python -m unittest discover -s tools -v   # also mvn verify in each extracted folder
+    EXT_102_BUILD=1 python -m unittest discover -s tools -v   # also build and test each extracted folder
     EXT_102_EXTENSIONS=ext-catalog,ext-catalog-connection ... # only these folders (the CI of EXT-104)
 
 The extraction uses `git filter-repo --subdirectory-filter` on a clone of HEAD when git-filter-repo
-is installed (pip install git-filter-repo), and a copy of the folder otherwise.
+is installed (pip install git-filter-repo), and a copy of the folder otherwise. The build follows
+tools/build_steps.py, as the README of each folder does: the extensions it requires, extracted on their own,
+installed first; its api/ module; mvn verify.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ import textwrap
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_steps as build  # noqa: E402
 import check_self_contained as check  # noqa: E402
 
 POM = """<project>
@@ -196,18 +199,30 @@ class ExtractionTest(unittest.TestCase):
             self.assertEqual(sorted(os.path.basename(f) for f in built), sorted(only),
                              "EXT_102_EXTENSIONS names a folder without a build")
         with tempfile.TemporaryDirectory(prefix="ext-102-extract-") as scratch:
+            extracted_folders: dict[str, str] = {}
+
+            def locate(name: str) -> str:
+                if name not in extracted_folders:
+                    extracted_folders[name] = self.extract(name, scratch)
+                return extracted_folders[name]
+
+            installed: set[str] = set()
             for folder in built:
                 name = os.path.basename(folder)
                 with self.subTest(extension=name):
-                    extracted = self.extract(name, scratch)
+                    extracted = locate(name)
                     for needed in ("README.md", "pom.xml", *check.WITH_BUILD):
                         self.assertTrue(os.path.exists(os.path.join(extracted, needed)), needed)
                     self.assertEqual([str(p) for p in check.check_extension(extracted, name)], [])
                     if os.environ.get("EXT_102_BUILD") == "1":
-                        mvn = shutil.which("mvn") or "mvn"
-                        result = subprocess.run([mvn, "-B", "-ntp", "verify"], cwd=extracted)
-                        self.assertEqual(result.returncode, 0, f"mvn verify failed in the extracted {name}")
-
+                        # The steps of its README: the extensions it requires installed first, each
+                        # extracted on its own, then its api/ module and mvn verify (tools/build_steps.py).
+                        steps = build.plan(name, check.ROOT, locate, installed)
+                        try:
+                            build.run(steps, locate)
+                        except build.BuildError as e:
+                            self.fail(f"the extracted {name} does not build: {e}")
+                        installed.update(build.order(name, check.ROOT)[:-1])
 
 if __name__ == "__main__":
     unittest.main()

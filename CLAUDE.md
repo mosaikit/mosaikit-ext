@@ -16,8 +16,8 @@ docs/requirements/  EXT-nnn.md that span several extensions (format of Mosaikit)
 ext-*/              one folder per extension, a project of its own: manifest, pom.xml, package.json,
                     web/, tests/, CHANGELOG.md, README and docs/requirements/ (README and requirements
                     only, until its code arrives)
-tools/              check_self_contained.py (EXT-102), release.py (EXT-103), affected.py (EXT-104)
-                    and their tests
+tools/              check_self_contained.py and build_steps.py (EXT-102), release.py (EXT-103),
+                    affected.py (EXT-104) and their tests
 ```
 
 ## Rules
