@@ -11,12 +11,11 @@
       A project of its own (ADR-0001): its parent is the published parent of Mosaikit extensions, never a
       POM of this repository (hence the empty relativePath).
 
-        mvn package    target/ext-catalog-0.1.0.zip, the package of the extension
+        mvn package    lib/ext-catalog.jar and target/ext-catalog-0.1.0.zip, the package of the extension
         mvn verify     also the tests of tests/ on the bench of @mosaikit/testing (npm test)
 
-      With Java code: remove the packaging line, add the APIs of the kernel with scope provided
-      (io.github.mosaikit:mosaikit-kernel-api and the Quarkus extensions it uses, as the samples do), and
-      declare backend.jar: lib/ext-catalog.jar in manifest.yaml.
+      The Java code compiles against the API of the kernel and the Quarkus extensions the kernel already
+      contains, all with scope provided: the JAR in lib/ holds only the classes of the extension.
     -->
     <parent>
         <groupId>io.github.mosaikit</groupId>
@@ -27,7 +26,6 @@
     <groupId>io.github.mosaikit.ext</groupId>
     <artifactId>ext-catalog</artifactId>
     <version>0.1.0</version>
-    <packaging>pom</packaging>
     <name>Catalog</name>
     <description>The file manager of an organization, with folders, sub-folders and sharing.</description>
     <url>https://github.com/mosaikit/mosaikit-ext/tree/main/ext-catalog</url>
@@ -36,4 +34,40 @@
         <connection>scm:git:https://github.com/mosaikit/mosaikit-ext.git</connection>
         <developerConnection>scm:git:git@github.com:mosaikit/mosaikit-ext.git</developerConnection>
     </scm>
+    <dependencies>
+        <dependency>
+            <groupId>io.github.mosaikit</groupId>
+            <artifactId>mosaikit-kernel-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-jackson</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-hibernate-orm</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-hibernate-validator</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-security</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.data</groupId>
+            <artifactId>jakarta.data-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>
