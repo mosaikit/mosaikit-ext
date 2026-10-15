@@ -29,6 +29,9 @@ and the versions [Semantic Versioning](https://semver.org/).
   selection box counted in the header, the pieces at the top level of the source and its state as last
   tested or listed (migration V3, fields `updated`, `pieces`, `morePieces`, `state` and `checked` of a
   connection), the last update, and a header with the order (most recent first, or by name).
+- A connection is edited from its detail panel (EXT-017): the second and third steps of its creation,
+  filled in, the type fixed; the change keeps the settings the form does not show (marked `readOnly` in
+  the form of the connector) and shows the new values on the card and in the detail at once.
 - Adding a connection takes three steps (EXT-013): the types grouped by category with their logos; the
   form of the connector, whose test previews the source (`POST /api/v1/ext/connections/connections/preview`)
   or shows its error; the name proposed, the type fixed, description, thumbnail and tags, which

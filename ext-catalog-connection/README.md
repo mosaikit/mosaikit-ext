@@ -84,8 +84,11 @@ New connection takes three steps, one path for every kind of source (EXT-013):
 3. **How it is named and found**: a name proposed from the address of the source (or from the type and
    the settings), a description, the type, fixed, a thumbnail and tags.
 
-Creating it closes the panel, and the new connection is in the list. Editing a connection takes the
-second and third steps, filled in, its type fixed.
+Creating it closes the panel, and the new connection is in the list. Editing a connection, from the
+Edit command of its detail (EXT-017), takes the second and third steps, filled in, its type fixed;
+the change starts from the settings the server returned and changes only those the form shows, and
+saving shows the new values on the card and in the detail, which opens again, without reloading the
+page.
 
 ## The detail of a connection
 
@@ -142,7 +145,9 @@ contracts:
   languages, its category (`database`, `warehouse`, `lake`, `api`, `stream`, `files`, or one of its
   own), its logo (an SVG or PNG image of the package of the connector, served by the kernel) and the
   connection form, a JSON Schema of the settings of a connection (strings, numbers, integers and
-  booleans, with titles, defaults and choices). The framework checks it at start and whenever it
+  booleans, with titles, defaults and choices; a setting marked `readOnly` is not shown in the form,
+  is set when the connection is created through the API, or takes its default, and is kept when the
+  connection is edited in the app). The framework checks it at start and whenever it
   lists the connectors: a declaration that lacks a field, or has a wrong one, is refused with a
   problem naming the field, in the log of the installation, in `GET /api/v1/ext/connections/connectors`
   and in the app; the other connectors keep working.

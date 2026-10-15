@@ -757,9 +757,11 @@ const extension = {
         const actions = [button(t('test'), () => this.testSaved(connection))];
         if (connection.editable) {
           actions.unshift(
+            // The form of its type, filled in, with the type fixed; saving or cancelling comes back to
+            // the detail (EXT-017).
             button(t('edit'), () => {
               this.closeDetail(false);
-              this.openEdit(connection);
+              this.openEdit(connection, true);
             }, 'primary'),
           );
         }
@@ -911,6 +913,7 @@ const extension = {
       async openCreate() {
         // The types are those of the connectors read with the list: wait for them.
         await this.loading;
+        this.returnTo = null;
         const t = this.t;
         const section = this.root.querySelector('section.create');
         section.hidden = false;
@@ -993,13 +996,17 @@ const extension = {
         );
       }
 
-      /** Edit: the steps of the connector of a connection after the first, with its values (EXT-015). */
-      async openEdit(connection) {
+      /**
+       * Edit: the steps of the connector of a connection after the first, with its values, the type
+       * fixed (EXT-015, EXT-017). From the detail, saving or cancelling opens the detail again.
+       */
+      async openEdit(connection, fromDetail = false) {
         await this.loading;
         const connector = this.connectorOf(connection);
         if (!connector) {
           return;
         }
+        this.returnTo = fromDetail ? connection.id : null;
         const section = this.root.querySelector('section.create');
         section.hidden = false;
         section.querySelector('#create-title').textContent = this.t('editNamed', connection);
@@ -1022,6 +1029,7 @@ const extension = {
         form.noValidate = true;
         form.replaceChildren();
         this.proposed = '';
+        this.editing = connection;
         this.preview = null;
 
         // Step 2: how to connect.
@@ -1038,6 +1046,10 @@ const extension = {
         const schema = connector.form ?? {};
         const required = new Set(schema.required ?? []);
         for (const [name, property] of Object.entries(schema.properties ?? {})) {
+          if (property.readOnly === true) {
+            // Kept with the connection, not set in the form (EXT-017).
+            continue;
+          }
           const title = property.title ?? name;
           if (property.type === 'boolean') {
             const box = input('checkbox', name, false);
@@ -1090,7 +1102,7 @@ const extension = {
         if (connection) {
           connectActions.append(this.submitButton(t('save')));
         }
-        connectActions.append(button(t('cancel'), () => this.closeCreate()));
+        connectActions.append(this.cancelButton());
         connect.append(connectActions);
 
         // Step 3: how it is named and found.
@@ -1138,7 +1150,7 @@ const extension = {
         namingActions.append(
           button(t('previous'), () => this.toConnecting(form, connection)),
           this.submitButton(t(connection ? 'save' : 'create')),
-          button(t('cancel'), () => this.closeCreate()),
+          this.cancelButton(),
         );
         naming.append(namingActions);
 
@@ -1157,14 +1169,30 @@ const extension = {
         this.toConnecting(form, connection);
       }
 
+      /** Cancel: closes the steps; from the detail, it opens the detail again. */
+      cancelButton() {
+        const cancel = button(this.t('cancel'), () => this.closeCreate());
+        if (this.returnTo) {
+          // Not a click outside the detail, which would close it again (EXT-016).
+          cancel.dataset.opens = 'detail';
+        }
+        return cancel;
+      }
+
       submitButton(text) {
         const submit = button(text, null, 'primary');
         submit.type = 'submit';
         return submit;
       }
 
+      /** Closes the panel of the steps; an edit opened from the detail goes back to it. */
       closeCreate() {
         this.root.querySelector('section.create').hidden = true;
+        const back = this.returnTo && (this.connections ?? []).find((connection) => connection.id === this.returnTo);
+        this.returnTo = null;
+        if (back && this.connectorOf(back)) {
+          this.openDetail(back);
+        }
       }
 
       /** Back to how to connect. */
@@ -1264,10 +1292,21 @@ const extension = {
         return box;
       }
 
-      /** What the form says, as the API takes it. */
+      /**
+       * What the form says, as the API takes it. A connection being edited starts from the settings the
+       * server returned and changes only those the form shows (EXT-017); a new one takes the defaults
+       * of the settings the form does not show.
+       */
       request(connector, form) {
-        const settings = {};
+        const base = this.editing?.type === connector.type ? this.editing.settings ?? {} : null;
+        const settings = { ...(base ?? {}) };
         for (const [name, property] of Object.entries(connector.form?.properties ?? {})) {
+          if (property.readOnly === true) {
+            if (!base && property.default !== undefined) {
+              settings[name] = property.default;
+            }
+            continue;
+          }
           const control = form.elements.namedItem(name);
           if (!control) {
             continue;
@@ -1276,6 +1315,8 @@ const extension = {
             settings[name] = control.checked;
           } else if (control.value !== '') {
             settings[name] = property.type === 'string' || Array.isArray(property.enum) ? control.value : Number(control.value);
+          } else {
+            delete settings[name];
           }
         }
         return {
@@ -1384,15 +1425,15 @@ const extension = {
         const t = this.t;
         try {
           const { name, description, settings, credential } = this.request(connector, form);
-          const saved = await call(`/connections/${encodeURIComponent(connection.id)}`, {
+          let saved = await call(`/connections/${encodeURIComponent(connection.id)}`, {
             method: 'PUT',
             body: JSON.stringify({ name, description, settings, credential }),
           });
-          await this.saveThumbnail(saved, form);
+          saved = (await this.saveThumbnail(saved, form)) ?? saved;
+          // The card and the detail show what the server saved, without reading the list again.
+          this.renderConnections((this.connections ?? []).map((other) => (other.id === saved.id ? saved : other)));
           this.closeCreate();
           this.status(t('saved', saved));
-          this.loading = this.load();
-          await this.loading;
         } catch (error) {
           this.status(t('failed', { message: error.message }), true);
         }
@@ -1403,10 +1444,12 @@ const extension = {
         const file = form.elements.namedItem('__thumbnail')?.files?.[0];
         const path = `/connections/${encodeURIComponent(connection.id)}/thumbnail`;
         if (file) {
-          await call(path, { method: 'PUT', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file });
-        } else if (form.elements.namedItem('__removeThumbnail')?.checked) {
-          await call(path, { method: 'DELETE' });
+          return call(path, { method: 'PUT', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file });
         }
+        if (form.elements.namedItem('__removeThumbnail')?.checked) {
+          return call(path, { method: 'DELETE' });
+        }
+        return null;
       }
 
       /**
