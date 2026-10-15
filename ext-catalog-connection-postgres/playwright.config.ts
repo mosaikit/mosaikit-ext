@@ -10,6 +10,8 @@ export default defineConfig({
   workers: 1,
   timeout: 60_000,
   forbidOnly: !!process.env.CI,
+  // In the CI a test that fails is run again once: the report marks it flaky instead of hiding it.
+  retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['github']] : [['list']],
   use: { trace: 'retain-on-failure', ...devices['Desktop Chrome'] },
 });
