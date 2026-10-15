@@ -72,5 +72,5 @@ jobs:
           EXT_102_BUILD: '1'
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
-          python3 -m pip install --quiet git-filter-repo==2.47.0
+          python3 -m pip install --quiet git-filter-repo==2.47.0 pyyaml
           python3 -m unittest discover -s tools -v
