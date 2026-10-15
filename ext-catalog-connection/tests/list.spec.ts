@@ -126,6 +126,8 @@ test.describe('EXT-011 all connections of an organization in one list, filtered 
     await page.getByRole('button', { name: names[0], exact: true }).click();
     await expect(page.getByRole('region', { name: `Contents of ${names[0]}` })).toBeVisible();
 
+    // The detail is a panel over the list (EXT-016): Escape closes it.
+    await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Grid' }).click();
     await expect(page.locator('ul.cards article.card')).toHaveCount(all.length);
   });

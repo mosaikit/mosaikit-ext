@@ -25,6 +25,10 @@ and the versions [Semantic Versioning](https://semver.org/).
   answers a state for each, and an empty source, which the app shows with four different messages. The
   extensions that consume data contribute their uses of pieces to the point `catalog.connection.use`,
   with the kinds and facts they need, and the app shows on each piece the uses it allows.
+- The detail of a connection opens as a panel over the list (EXT-016): on the right edge of the app,
+  without moving the cards, with the facts of the connection fixed while its pieces scroll and its
+  actions (edit, test) at the bottom; the open card is marked and has `aria-current`, and the panel
+  closes from the same card, a click outside it, Escape or its close button.
 - Queries on connections (EXT-040): `Connector.query` returns the rows of a query capped at the row
   limit, through `POST /api/v1/ext/connections/connections/{id}/query`.
 - Connectors are extensions, discovered by the framework (EXT-010): the contract `connector`

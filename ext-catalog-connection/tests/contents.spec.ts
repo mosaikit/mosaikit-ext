@@ -44,8 +44,12 @@ async function contents(id: string, parent = ''): Promise<Contents> {
   return body as Contents;
 }
 
-/** The region of the contents of a connection, opened from the list of the app. */
+/**
+ * The region of the contents of a connection, opened from the list of the app; the detail of another
+ * connection, a panel over the list (EXT-016), is closed first, since it may cover the card.
+ */
 async function open(page: Page, name: string, title = `Contents of ${name}`) {
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name, exact: true }).click();
   return page.getByRole('region', { name: title });
 }

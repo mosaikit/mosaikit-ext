@@ -53,7 +53,19 @@ those they edit: name, description, settings, credential and thumbnail; the type
 | `POST /api/v1/ext/connections/connections/{id}/test`, `GET .../{id}/contents` | `use` | test, contents |
 
 The list page has the shape of the list page of the UI kit of Mosaikit (MK-105) and takes the same
-inputs (facets, card, columns), so that the kit replaces `web/list.js` when it is published.
+inputs (facets, card, columns). The shell defines the elements of the kit only for the frontends that
+run as modules, not in the frame of an isolated one, so `web/list.js` stays until the frame has them too.
+
+## The detail of a connection
+
+Clicking a card, or the name of a connection in its row, opens its detail (EXT-016): a panel over the
+list, on the right edge of the area of the app and as high as it, so that the cards do not move. Its
+header (thumbnail and name) and the facts of the connection (type, category, description, address,
+owner, and the place of its tags) stay in place while the pieces of the connection (EXT-019) scroll
+under them; the actions on the connection (edit, test) stay at the bottom. Clicking the same card
+again, clicking outside the panel, Escape or its close button close it; clicking another card shows
+that card's detail. The open card, or row, is marked as selected and has `aria-current`, and the name
+that opens it says whether the detail is expanded.
 
 ## Connectors
 
