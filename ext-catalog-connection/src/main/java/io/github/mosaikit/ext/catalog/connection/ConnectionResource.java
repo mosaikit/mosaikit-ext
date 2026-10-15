@@ -157,6 +157,13 @@ public class ConnectionResource {
      * @param thumbnail the file of its uploaded thumbnail in the file service of the kernel, {@code
      *     null} when the thumbnail is generated from its name
      * @param editable whether the person may change it
+     * @param updated when it was last changed (EXT-014)
+     * @param pieces the pieces at the top level of its source as last listed, {@code null} until it is
+     *     listed (EXT-014)
+     * @param morePieces whether its source held more pieces than those counted
+     * @param state {@code reachable} or {@code unreachable} at the last test or listing of its source,
+     *     {@code null} before
+     * @param checked when its source was last tested or listed, {@code null} before
      */
     public record ConnectionView(
             UUID id,
@@ -171,7 +178,12 @@ public class ConnectionResource {
             String address,
             OwnerView owner,
             UUID thumbnail,
-            boolean editable) {}
+            boolean editable,
+            Instant updated,
+            Integer pieces,
+            boolean morePieces,
+            String state,
+            Instant checked) {}
 
     /**
      * A page of the contents of a connection, in the one shape of every connector (EXT-019).
@@ -342,6 +354,7 @@ public class ConnectionResource {
         connection.describe(description);
         connection.configure(
                 values, credentialName(request.credential()), Addresses.of(found.connector(), values).orElse(null));
+        connection.touch(Instant.now());
         connections.update(connection);
         resources.update(ref(id), details(connection));
         return view(connection, discovery);
@@ -389,6 +402,7 @@ public class ConnectionResource {
         }
         forgetThumbnail(connection);
         connection.thumbnail(stored.id());
+        connection.touch(Instant.now());
         connections.update(connection);
         return view(connection, catalog.discover());
     }
@@ -401,6 +415,7 @@ public class ConnectionResource {
         Connection connection = find(id, EDIT);
         forgetThumbnail(connection);
         connection.thumbnail(null);
+        connection.touch(Instant.now());
         connections.update(connection);
         return view(connection, catalog.discover());
     }
@@ -424,7 +439,11 @@ public class ConnectionResource {
     public TestResult test(@PathParam("id") UUID id) {
         Connection connection = find(id, USE);
         Discovery.Found found = available(connection, catalog.discover());
-        return test(found.connector(), connection.getSettings(), connection.getCredential());
+        TestResult result = test(found.connector(), connection.getSettings(), connection.getCredential());
+        // The state of the source that the card shows (EXT-014).
+        connection.checked(result.success(), Instant.now());
+        connections.update(connection);
+        return result;
     }
 
     /**
@@ -445,7 +464,7 @@ public class ConnectionResource {
         }
         Connection connection = find(id, USE);
         Connector connector = available(connection, catalog.discover()).connector();
-        return withSettings(connection.getSettings(), connection.getCredential(), settings -> {
+        ContentsView contents = withSettings(connection.getSettings(), connection.getCredential(), settings -> {
             try {
                 return ContentsView.listed(parent, connector.list(settings, parent, new Paging(offset, limit)), offset == 0);
             } catch (ContentsUnavailableException e) {
@@ -454,6 +473,21 @@ public class ConnectionResource {
                 throw problem(Response.Status.NOT_FOUND, "No such container in the source: " + parent);
             }
         });
+        measure(connection, contents, offset);
+        return contents;
+    }
+
+    /**
+     * What a listing tells of the source of a connection, which its card shows (EXT-014): whether it
+     * answers and, for the first page of its top level, how many pieces it holds.
+     */
+    private void measure(Connection connection, ContentsView contents, int offset) {
+        boolean reachable = !"unreachable".equals(contents.state());
+        connection.checked(reachable, Instant.now());
+        if (contents.parent().isEmpty() && offset == 0 && Set.of("listed", "empty").contains(contents.state())) {
+            connection.counted(contents.items().size(), contents.more());
+        }
+        connections.update(connection);
     }
 
     /**
@@ -648,7 +682,12 @@ public class ConnectionResource {
                 connection.getAddress(),
                 owner == null ? null : new OwnerView(owner, names.of(owner)),
                 connection.getThumbnail(),
-                sharing.allows(ref(connection.getId()), EDIT));
+                sharing.allows(ref(connection.getId()), EDIT),
+                connection.getUpdatedAt(),
+                connection.getPieces(),
+                connection.hasMorePieces(),
+                connection.getSourceState(),
+                connection.getCheckedAt());
     }
 
     /** The names of the people of the organization, each read once for an answer. */

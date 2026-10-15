@@ -25,6 +25,10 @@ and the versions [Semantic Versioning](https://semver.org/).
   answers a state for each, and an empty source, which the app shows with four different messages. The
   extensions that consume data contribute their uses of pieces to the point `catalog.connection.use`,
   with the kinds and facts they need, and the app shows on each piece the uses it allows.
+- Connection cards with selection, size, freshness, status, owner and commands (EXT-014): a
+  selection box counted in the header, the pieces at the top level of the source and its state as last
+  tested or listed (migration V3, fields `updated`, `pieces`, `morePieces`, `state` and `checked` of a
+  connection), the last update, and a header with the order (most recent first, or by name).
 - The detail of a connection opens as a panel over the list (EXT-016): on the right edge of the app,
   without moving the cards, with the facts of the connection fixed while its pieces scroll and its
   actions (edit, test) at the bottom; the open card is marked and has `aria-current`, and the panel

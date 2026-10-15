@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 /**
- * A list page with the shape of the other list pages of the platform (EXT-011): a header with the
- * number of items and a switch between a grid of cards and rows, a column of facets that filters
+ * A list page with the shape of the other list pages of the platform (EXT-011, EXT-014): a header with
+ * the number of items shown, the number selected, the order and a switch between a grid of cards and
+ * rows, a column of facets that filters
  * instead of navigating, each value with the number of items it matches, and the items. It knows
  * nothing of connections: the page gives the facets, the card and the columns. When the list page of
  * the UI kit of the platform is available, it takes the place of this module with the same inputs.
@@ -13,6 +14,11 @@
 export const LIST_STYLE = `
   .list-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 16px 0 8px; }
   .list-head .count { color: var(--mk-muted); font-size: 13px; }
+  .list-head .title { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .list-head .tools { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .list-head .selection { display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; color: var(--mk-accent); }
+  .list-head label.sort { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--mk-muted); }
+  .list-head label.sort select { min-width: 0; }
   .switch { display: inline-flex; border: 1px solid var(--mk-line); border-radius: var(--mk-radius); overflow: hidden; }
   .switch button { border: 0; border-radius: 0; }
   .switch button[aria-pressed='true'] { background: var(--mk-accent); color: var(--mk-accent-fg); }
@@ -41,7 +47,10 @@ export const LIST_STYLE = `
  *     facets narrow each other
  * @param {(item: object) => HTMLElement} options.card the card of an item in the grid
  * @param {{ title: string, cell: (item: object) => Node | string }[]} options.columns the columns of the rows
- * @param {object} options.labels the texts: count(n), view, grid, rows, filters, noMatch, empty, none
+ * @param {{ id: string, title: string, compare: (a: object, b: object) => number }[]} options.sorts the
+ *     orders the person chooses among, the first one by default
+ * @param {object} options.labels the texts: count(n), selected(n), clearSelection, select(item), sort,
+ *     view, grid, rows, filters, noMatch, empty, none
  * @param {() => void} [options.rendered] called after each drawing of the items, such as to mark the selected one
  */
 export class ListPage {
@@ -49,6 +58,9 @@ export class ListPage {
     this.options = options;
     this.items = [];
     this.view = 'grid';
+    this.sort = options.sorts[0].id;
+    /** The keys of the items selected with their boxes. */
+    this.selected = new Set();
     /** The values chosen in each facet. */
     this.chosen = new Map(options.facets.map((facet) => [facet.id, new Set()]));
     const { labels } = options;
@@ -73,7 +85,43 @@ export class ListPage {
       views.append(button);
       return button;
     });
-    head.append(this.count, views);
+    const sort = document.createElement('label');
+    sort.className = 'sort';
+    sort.append(document.createTextNode(labels.sort));
+    this.sorter = document.createElement('select');
+    this.sorter.name = 'sort';
+    for (const order of options.sorts) {
+      const option = document.createElement('option');
+      option.value = order.id;
+      option.textContent = order.title;
+      this.sorter.append(option);
+    }
+    this.sorter.addEventListener('change', () => {
+      this.sort = this.sorter.value;
+      this.render();
+    });
+    sort.append(this.sorter);
+    this.selection = document.createElement('div');
+    this.selection.className = 'selection';
+    this.selection.setAttribute('role', 'group');
+    this.selectedCount = document.createElement('span');
+    this.selectedCount.className = 'selected-count';
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'clear';
+    clear.textContent = labels.clearSelection;
+    clear.addEventListener('click', () => {
+      this.selected.clear();
+      this.render();
+    });
+    this.selection.append(this.selectedCount, clear);
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.append(this.count, this.selection);
+    const tools = document.createElement('div');
+    tools.className = 'tools';
+    tools.append(sort, views);
+    head.append(title, tools);
     const body = document.createElement('div');
     body.className = 'list-body';
     this.facets = document.createElement('aside');
@@ -85,9 +133,15 @@ export class ListPage {
     container.append(head, body);
   }
 
-  /** Shows these items, keeping the chosen values that are still among them. */
+  /** Shows these items, keeping the chosen values and the selected items that are still among them. */
   setItems(items) {
     this.items = items;
+    const keys = new Set(items.map((item) => this.options.key(item)));
+    for (const key of [...this.selected]) {
+      if (!keys.has(key)) {
+        this.selected.delete(key);
+      }
+    }
     for (const facet of this.options.facets) {
       const present = new Set(items.flatMap((item) => facet.values(item).map((value) => value.value)));
       const chosen = this.chosen.get(facet.id);
@@ -108,15 +162,47 @@ export class ListPage {
     });
   }
 
-  /** The items the chosen values let through. */
+  /** The items the chosen values let through, in the order chosen. */
   filtered() {
-    return this.items.filter((item) => this.matches(item));
+    const order = this.options.sorts.find((sort) => sort.id === this.sort) ?? this.options.sorts[0];
+    return this.items.filter((item) => this.matches(item)).sort(order.compare);
+  }
+
+  /**
+   * The selection box of an item, for its card or its row: checking it adds the item to the selection,
+   * which the header counts.
+   */
+  selectionBox(item) {
+    const key = this.options.key(item);
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'select';
+    box.checked = this.selected.has(key);
+    box.setAttribute('aria-label', this.options.labels.select(item));
+    box.addEventListener('change', () => {
+      if (box.checked) {
+        this.selected.add(key);
+      } else {
+        this.selected.delete(key);
+      }
+      this.renderSelection();
+    });
+    return box;
+  }
+
+  /** The number selected in the header, shown when there is a selection. */
+  renderSelection() {
+    this.selectedCount.textContent = this.options.labels.selected(this.selected.size);
+    this.selection.hidden = this.selected.size === 0;
+    this.selection.setAttribute('aria-label', this.selectedCount.textContent);
   }
 
   render() {
     const { labels } = this.options;
     const items = this.filtered();
     this.count.textContent = labels.count(items.length);
+    this.sorter.value = this.sort;
+    this.renderSelection();
     for (const button of this.switches) {
       button.setAttribute('aria-pressed', String(button.dataset.view === this.view));
     }
@@ -220,6 +306,10 @@ export class ListPage {
     wrapper.className = 'table';
     const table = document.createElement('table');
     const head = document.createElement('tr');
+    const selectHead = document.createElement('th');
+    selectHead.scope = 'col';
+    selectHead.className = 'select';
+    head.append(selectHead);
     for (const column of this.options.columns) {
       const cell = document.createElement('th');
       cell.scope = 'col';
@@ -233,6 +323,10 @@ export class ListPage {
       ...items.map((item) => {
         const row = document.createElement('tr');
         row.dataset.id = this.options.key(item);
+        const select = document.createElement('td');
+        select.className = 'select';
+        select.append(this.selectionBox(item));
+        row.append(select);
         for (const column of this.options.columns) {
           const cell = document.createElement('td');
           cell.className = column.className ?? '';

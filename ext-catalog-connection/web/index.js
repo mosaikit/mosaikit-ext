@@ -117,6 +117,14 @@ const STYLE = `
   [role='status'] { min-height: 1.2em; margin: 8px 0; color: var(--mk-muted); }
   [role='status'].error { color: var(--mk-danger); }
   [hidden] { display: none !important; }
+  article.card { position: relative; }
+  article.card > input.select { position: absolute; top: 8px; left: 8px; z-index: 1; width: 18px; height: 18px; margin: 0;
+                                accent-color: var(--mk-accent); cursor: pointer; }
+  .measures { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; color: var(--mk-muted); font-size: 12px; }
+  .status { align-self: flex-start; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--mk-line); }
+  .status[data-status='reachable'] { color: var(--mk-success); border-color: var(--mk-success); }
+  .status[data-status='unreachable'], .status[data-status='unavailable'] { color: var(--mk-danger); border-color: var(--mk-danger); }
+  td.select, th.select { width: 1%; }
   article.card.opens { cursor: pointer; }
   article.card.opens:hover { border-color: var(--mk-accent); }
   article.card.selected, tr.selected { outline: 2px solid var(--mk-accent); outline-offset: -2px;
@@ -229,16 +237,28 @@ const extension = {
           facets: [{ id: 'type', title: t('facetType'), values: (connection) => [{ value: connection.type, label: this.typeTitle(connection) }] }],
           card: (connection) => this.card(connection),
           rendered: () => this.refreshSelection(),
+          // Most recent first by default, then by name (EXT-014).
+          sorts: [
+            { id: 'recent', title: t('sortRecent'), compare: (a, b) => time(b.updated) - time(a.updated) || byName(a, b) },
+            { id: 'name', title: t('sortName'), compare: byName },
+          ],
           columns: [
             { title: t('columnName'), className: 'name', cell: (connection) => this.nameCell(connection) },
             { title: t('columnDescription'), cell: (connection) => subtitle(connection) },
             { title: t('columnType'), cell: (connection) => this.kind(connection) },
             { title: t('columnCategory'), cell: (connection) => this.categoryOf(connection) },
+            { title: t('columnSize'), cell: (connection) => this.size(connection) },
+            { title: t('columnUpdated'), cell: (connection) => this.updated(connection) },
+            { title: t('columnStatus'), cell: (connection) => this.state(connection) },
             { title: t('columnOwner'), cell: (connection) => this.ownerOf(connection) },
             { title: t('columnActions'), cell: (connection) => this.actions(connection) },
           ],
           labels: {
             count: (count) => t(count === 1 ? 'countOne' : 'count', { count }),
+            selected: (count) => t(count === 1 ? 'selectedOne' : 'selected', { count }),
+            clearSelection: t('clearSelection'),
+            select: (connection) => t('select', connection),
+            sort: t('sortBy'),
             view: t('view'),
             grid: t('grid'),
             rows: t('rows'),
@@ -354,7 +374,10 @@ const extension = {
         return connector ? categoryName(context.locale, connector.category) : '';
       }
 
-      /** The card of a connection: thumbnail, name, description or address, type, owner and commands. */
+      /**
+       * The card of a connection: a selection box, thumbnail, name, description or address, type, its
+       * size, last update and status (EXT-014), and a footer with the owner and the commands.
+       */
       card(connection) {
         const t = this.t;
         const card = document.createElement('article');
@@ -372,7 +395,8 @@ const extension = {
           card.dataset.opens = 'detail';
           card.classList.add('opens');
           card.addEventListener('click', (event) => {
-            if (!event.composedPath().some((node) => node instanceof HTMLElement && node.classList.contains('actions'))) {
+            const path = event.composedPath();
+            if (!path.some((node) => node instanceof HTMLElement && (node.classList.contains('actions') || node.classList.contains('select')))) {
               this.toggleDetail(connection);
             }
           });
@@ -383,10 +407,63 @@ const extension = {
           body.append(placeholder(connection, t, context.locale), subtitle(connection));
         }
         body.append(this.kind(connection));
+        const measures = document.createElement('p');
+        measures.className = 'measures';
+        measures.append(this.size(connection), this.updated(connection));
+        body.append(measures, this.state(connection));
         const footer = document.createElement('footer');
         footer.append(this.ownerOf(connection), this.actions(connection));
-        card.append(this.thumbnail(connection), body, footer);
+        card.append(this.list.selectionBox(connection), this.thumbnail(connection), body, footer);
         return card;
+      }
+
+      /**
+       * How big the source of a connection is (EXT-014): the pieces at its top level as last listed, or
+       * that it was not listed yet.
+       */
+      size(connection) {
+        const size = document.createElement('span');
+        size.className = 'size';
+        const pieces = connection.pieces;
+        if (pieces === null || pieces === undefined) {
+          size.dataset.pieces = '';
+          size.textContent = this.t('sizeUnknown');
+        } else {
+          size.dataset.pieces = String(pieces);
+          size.textContent = connection.morePieces
+            ? this.t('piecesMore', { count: pieces })
+            : this.t(pieces === 1 ? 'pieceOne' : 'pieces', { count: pieces });
+        }
+        return size;
+      }
+
+      /** How fresh a connection is (EXT-014): when it was last changed, relative to now. */
+      updated(connection) {
+        const updated = document.createElement('time');
+        updated.className = 'updated';
+        const when = connection.updated ?? connection.created;
+        updated.dateTime = when ?? '';
+        updated.textContent = this.t('updated', { when: relative(when, context.locale) });
+        if (when) {
+          updated.title = new Date(when).toLocaleString(context.locale);
+        }
+        return updated;
+      }
+
+      /**
+       * The status of a connection (EXT-014): unavailable when its connector is absent, otherwise the
+       * state of its source at the last test or listing, or not checked yet.
+       */
+      state(connection) {
+        const state = document.createElement('span');
+        state.className = 'status';
+        const value = !connection.available ? 'unavailable' : (connection.state ?? 'unchecked');
+        state.dataset.status = value;
+        state.textContent = this.t(STATUS_MESSAGES[value] ?? 'statusUnchecked');
+        if (connection.checked) {
+          state.title = this.t('checked', { when: new Date(connection.checked).toLocaleString(context.locale) });
+        }
+        return state;
       }
 
       /** The name of a connection as the button that opens and closes its detail (EXT-016). */
@@ -530,6 +607,19 @@ const extension = {
         footer.replaceChildren(...actions);
       }
 
+      /**
+       * Reads a connection again, after a test or a listing changed what its card says of its source
+       * (EXT-014).
+       */
+      async refresh(id) {
+        try {
+          const fresh = await call(`/connections/${encodeURIComponent(id)}`);
+          this.renderConnections((this.connections ?? []).map((connection) => (connection.id === id ? fresh : connection)));
+        } catch {
+          // The card keeps what it said; the next load reads it again.
+        }
+      }
+
       /** Tests a saved connection with its settings and credential. */
       async testSaved(connection) {
         const t = this.t;
@@ -537,6 +627,7 @@ const extension = {
         try {
           const result = await call(`/connections/${encodeURIComponent(connection.id)}/test`, { method: 'POST' });
           this.status(t(result.success ? 'tested' : 'testFailed', result), !result.success);
+          await this.refresh(connection.id);
         } catch (error) {
           this.status(t('testFailed', { message: error.message }), true);
         }
@@ -945,6 +1036,10 @@ const extension = {
             list.append(this.pieceItem(connection, trail, piece, uses));
           }
           browsing.offset = offset + page.items.length;
+          if (trail.length === 0 && offset === 0) {
+            // The listing measured the source: its card says so (EXT-014).
+            this.refresh(connection.id);
+          }
           section.querySelector('button.more').hidden = !page.more;
         } catch (error) {
           this.status(t('failed', { message: error.message }), true);
@@ -1006,6 +1101,37 @@ const extension = {
     customElements.define(ELEMENT, Connections);
   },
 };
+
+/** The text of each status of a connection on its card (EXT-014). */
+const STATUS_MESSAGES = {
+  reachable: 'statusReachable',
+  unreachable: 'statusUnreachable',
+  unchecked: 'statusUnchecked',
+  unavailable: 'statusUnavailable',
+};
+
+/** The time of an instant of the API, 0 when there is none. */
+function time(instant) {
+  const value = instant ? Date.parse(instant) : NaN;
+  return Number.isNaN(value) ? 0 : value;
+}
+
+/** The order of connections by name, in any case. */
+function byName(a, b) {
+  return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+}
+
+/** An instant relative to now in the language of the locale, such as 5 minutes ago or yesterday. */
+function relative(instant, locale) {
+  const seconds = (time(instant) - Date.now()) / 1000;
+  const format = new Intl.RelativeTimeFormat(locale ?? 'en', { numeric: 'auto' });
+  for (const [unit, size] of [['year', 31_536_000], ['month', 2_592_000], ['week', 604_800], ['day', 86_400], ['hour', 3_600], ['minute', 60]]) {
+    if (Math.abs(seconds) >= size) {
+      return format.format(Math.round(seconds / size), unit);
+    }
+  }
+  return format.format(0, 'second');
+}
 
 /** The message of each state of a listing that has nothing to show (EXT-019). */
 const STATE_MESSAGES = {
