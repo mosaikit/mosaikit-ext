@@ -3,9 +3,16 @@
 package io.github.mosaikit.ext.catalog.connection;
 
 import dev.mosaikit.kernel.api.context.CurrentOrganization;
+import dev.mosaikit.kernel.api.files.FileStorage;
+import dev.mosaikit.kernel.api.files.StoredFile;
+import dev.mosaikit.kernel.api.resource.Resource;
+import dev.mosaikit.kernel.api.resource.ResourceRef;
+import dev.mosaikit.kernel.api.resource.Resources;
 import dev.mosaikit.kernel.api.secrets.SecretValue;
 import dev.mosaikit.kernel.api.secrets.Secrets;
 import dev.mosaikit.kernel.api.secrets.SecretsUnavailableException;
+import dev.mosaikit.kernel.api.sharing.Sharing;
+import dev.mosaikit.kernel.api.teams.People;
 import io.github.mosaikit.ext.catalog.connection.api.v1.ConnectionSettings;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Connector;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Declaration;
@@ -16,10 +23,13 @@ import io.github.mosaikit.ext.catalog.connection.api.v1.TestResult;
 import io.quarkus.security.Authenticated;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -27,10 +37,17 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -40,6 +57,11 @@ import java.util.function.Function;
  * contract (MK-134), keeps the connections, reads their credentials from the secrets service of the
  * kernel at the moment of a call and passes them to the connector. No answer of this API contains a
  * credential.
+ *
+ * <p>Each connection is a resource of the kernel (MK-054), owned by the person who creates it and
+ * shared with the dialog of the platform (MK-055): a person lists the connections they view, browses
+ * and tests those they use, and changes those they edit. A connection has a description, the address
+ * of its source and a thumbnail (EXT-011, EXT-015).
  */
 @Path("/api/v1/ext/connections")
 @Produces(MediaType.APPLICATION_JSON)
@@ -52,6 +74,27 @@ public class ConnectionResource {
 
     /** The most entries of a page of contents. */
     static final int MAX_PAGE = 500;
+
+    /** The resource type of a connection in the manifest. */
+    static final String TYPE = "connection";
+
+    /** The level that lists a connection. */
+    static final String VIEW = "view";
+
+    /** The level that browses and tests a connection. */
+    static final String USE = "use";
+
+    /** The level that changes a connection. */
+    static final String EDIT = "edit";
+
+    /** The largest uploaded thumbnail, in bytes. */
+    static final int MAX_THUMBNAIL = 1024 * 1024;
+
+    /**
+     * The types of image a thumbnail may have. SVG is not among them: an image a person uploads, served
+     * by the kernel, must not carry scripts.
+     */
+    static final Set<String> THUMBNAIL_TYPES = Set.of("image/png", "image/jpeg", "image/gif", "image/webp");
 
     /**
      * A type of source that New connection offers.
@@ -77,7 +120,22 @@ public class ConnectionResource {
     public record ConnectorsView(List<ConnectorView> connectors, List<ProblemView> problems) {}
 
     /** Request to create a connection, or to test one before creating it. */
-    public record NewConnection(String name, String type, Map<String, Object> settings, String credential) {}
+    public record NewConnection(
+            String name, String type, String description, Map<String, Object> settings, String credential) {}
+
+    /**
+     * Request to change a connection, whose type never changes: its name, its description (empty or
+     * {@code null} clears it), the values of its form and its credential.
+     */
+    public record ConnectionChange(String name, String description, Map<String, Object> settings, String credential) {}
+
+    /**
+     * The owner of a connection.
+     *
+     * @param account the account of the person
+     * @param name the name shown for the person, {@code null} when they are no longer in the organization
+     */
+    public record OwnerView(UUID account, String name) {}
 
     /**
      * A connection in a list.
@@ -87,6 +145,12 @@ public class ConnectionResource {
      *     connection is kept as it is and works again when the connector comes back
      * @param settings the values of its connection form
      * @param credential the name of its credential in the secrets service, never the credential
+     * @param description its description, {@code null} without one
+     * @param address the address of its source, which the card shows when there is no description
+     * @param owner the person who owns it, {@code null} when the organization does
+     * @param thumbnail the file of its uploaded thumbnail in the file service of the kernel, {@code
+     *     null} when the thumbnail is generated from its name
+     * @param editable whether the person may change it
      */
     public record ConnectionView(
             UUID id,
@@ -96,7 +160,12 @@ public class ConnectionResource {
             boolean available,
             Map<String, Object> settings,
             String credential,
-            Instant created) {}
+            Instant created,
+            String description,
+            String address,
+            OwnerView owner,
+            UUID thumbnail,
+            boolean editable) {}
 
     /** A page of the contents of a connection. */
     public record ContentsView(String path, List<Entry> items, boolean more) {}
@@ -105,13 +174,28 @@ public class ConnectionResource {
     private final ConnectorCatalog catalog;
     private final CurrentOrganization organization;
     private final Secrets secrets;
+    private final Resources resources;
+    private final Sharing sharing;
+    private final People people;
+    private final FileStorage files;
 
     public ConnectionResource(
-            Connections connections, ConnectorCatalog catalog, CurrentOrganization organization, Secrets secrets) {
+            Connections connections,
+            ConnectorCatalog catalog,
+            CurrentOrganization organization,
+            Secrets secrets,
+            Resources resources,
+            Sharing sharing,
+            People people,
+            FileStorage files) {
         this.connections = connections;
         this.catalog = catalog;
         this.organization = organization;
         this.secrets = secrets;
+        this.resources = resources;
+        this.sharing = sharing;
+        this.people = people;
+        this.files = files;
     }
 
     /** The types of source of the connectors active in the organization, and the connectors refused. */
@@ -128,45 +212,161 @@ public class ConnectionResource {
                         .toList());
     }
 
-    /** The connections of the organization, by name; those whose connector is absent are unavailable. */
+    /**
+     * The connections of the organization that the person views, whatever their connector, by name;
+     * those whose connector is absent are unavailable.
+     */
     @GET
     @Path("connections")
     @Transactional
     public List<ConnectionView> list() {
         Discovery discovery = catalog.discover();
-        return connections.all().stream().map(connection -> view(connection, discovery)).toList();
+        Set<String> visible = sharing.visible(EXTENSION, TYPE, VIEW);
+        Map<String, UUID> owners = new HashMap<>();
+        for (Resource resource : resources.list(EXTENSION, TYPE, null)) {
+            if (resource.owner() != null) {
+                owners.put(resource.ref().id(), resource.owner());
+            }
+        }
+        Names names = new Names();
+        return connections.all().stream()
+                .filter(connection -> visible.contains(connection.getId().toString()))
+                .map(connection -> view(connection, discovery, owners.get(connection.getId().toString()), names))
+                .toList();
     }
 
-    /** Creates a connection with a connector active in the organization. */
+    /** A connection that the person views. */
+    @GET
+    @Path("connections/{id}")
+    @Transactional
+    public ConnectionView get(@PathParam("id") UUID id) {
+        return view(find(id, VIEW), catalog.discover());
+    }
+
+    /**
+     * Creates a connection with a connector active in the organization, owned by the person of the
+     * request.
+     */
     @POST
     @Path("connections")
     @Transactional
     public Response create(NewConnection request) {
-        if (request == null || request.name() == null || request.name().isBlank()) {
+        if (request == null) {
             throw problem(Response.Status.BAD_REQUEST, "The name of the connection is required");
         }
-        String name = request.name().strip();
-        if (name.length() > Connection.MAX_NAME) {
-            throw problem(Response.Status.BAD_REQUEST, "The name is longer than " + Connection.MAX_NAME + " characters");
-        }
+        String name = name(request.name());
+        String description = description(request.description());
         Discovery discovery = catalog.discover();
         Discovery.Found found = usable(discovery, request.type());
         Map<String, Object> values = checked(found.declaration(), request.settings());
         if (connections.countByName(name) > 0) {
             throw problem(Response.Status.CONFLICT, "A connection named " + name + " exists already");
         }
+        String credential = credentialName(request.credential());
         Connection connection = new Connection(
                 organization.require(),
                 name,
                 found.declaration().type(),
                 found.connector().extension(),
                 values,
-                credentialName(request.credential()),
+                credential,
                 Instant.now());
+        connection.describe(description);
+        connection.configure(values, credential, Addresses.of(found.connector(), values).orElse(null));
         connections.insert(connection);
+        // The kernel records the person of the request as the owner (EXT-015), in the same transaction.
+        resources.register(ref(connection.getId()), details(connection));
         return Response.status(Response.Status.CREATED)
                 .entity(view(connection, discovery))
                 .build();
+    }
+
+    /**
+     * Changes the name, the description, the values of the form and the credential of a connection
+     * that the person edits. Its type never changes, and its connector must be active to check the
+     * values. An empty description clears it.
+     */
+    @PUT
+    @Path("connections/{id}")
+    @Transactional
+    public ConnectionView update(@PathParam("id") UUID id, ConnectionChange request) {
+        if (request == null) {
+            throw problem(Response.Status.BAD_REQUEST, "The name of the connection is required");
+        }
+        Connection connection = find(id, EDIT);
+        String name = name(request.name());
+        String description = description(request.description());
+        Discovery discovery = catalog.discover();
+        Discovery.Found found = available(connection, discovery);
+        Map<String, Object> values = checked(found.declaration(), request.settings());
+        if (connections.countOthersByName(name, id) > 0) {
+            throw problem(Response.Status.CONFLICT, "A connection named " + name + " exists already");
+        }
+        connection.rename(name);
+        connection.describe(description);
+        connection.configure(
+                values, credentialName(request.credential()), Addresses.of(found.connector(), values).orElse(null));
+        connections.update(connection);
+        resources.update(ref(id), details(connection));
+        return view(connection, discovery);
+    }
+
+    /**
+     * Uploads the thumbnail of a connection that the person edits, an image that its card shows
+     * instead of the one generated from its name (EXT-011), replacing the previous one. It is a file of
+     * the file service of the kernel attached to the connection, so that it follows its sharing.
+     */
+    @PUT
+    @Path("connections/{id}/thumbnail")
+    @Consumes(MediaType.WILDCARD)
+    @Transactional
+    public ConnectionView thumbnail(
+            @PathParam("id") UUID id, @HeaderParam("Content-Type") String contentType, InputStream content) {
+        Connection connection = find(id, EDIT);
+        String type = contentType == null ? "" : contentType.split(";")[0].strip().toLowerCase(Locale.ROOT);
+        if (!THUMBNAIL_TYPES.contains(type)) {
+            throw problem(Response.Status.UNSUPPORTED_MEDIA_TYPE, "A thumbnail is a PNG, JPEG, GIF or WebP image");
+        }
+        byte[] image;
+        try {
+            image = content.readNBytes(MAX_THUMBNAIL + 1);
+        } catch (IOException e) {
+            throw problem(Response.Status.BAD_REQUEST, "The image could not be read");
+        }
+        if (image.length == 0) {
+            throw problem(Response.Status.BAD_REQUEST, "The image is empty");
+        }
+        if (image.length > MAX_THUMBNAIL) {
+            throw problem(Response.Status.REQUEST_ENTITY_TOO_LARGE, "A thumbnail is at most 1 MB");
+        }
+        StoredFile stored;
+        try {
+            stored = files.store(
+                    EXTENSION,
+                    FileStorage.NewFile.of("thumbnail-" + id, type).attachedTo(ref(id)),
+                    new ByteArrayInputStream(image));
+        } catch (IllegalArgumentException e) {
+            throw problem(Response.Status.BAD_REQUEST, e.getMessage());
+        } catch (IllegalStateException e) {
+            // The image does not fit the storage quota of the organization; the kernel names the limit.
+            throw problem(Response.Status.FORBIDDEN, e.getMessage());
+        }
+        forgetThumbnail(connection);
+        connection.thumbnail(stored.id());
+        connections.update(connection);
+        return view(connection, catalog.discover());
+    }
+
+    /** Removes the uploaded thumbnail of a connection that the person edits: its card generates one again. */
+    @DELETE
+    @Path("connections/{id}/thumbnail")
+    @Transactional
+    public ConnectionView removeThumbnail(@PathParam("id") UUID id) {
+        Connection connection = find(id, EDIT);
+        forgetThumbnail(connection);
+        connection.thumbnail(null);
+        connections.update(connection);
+        return view(connection, catalog.discover());
     }
 
     /** Tests the settings of a connection before it is created. */
@@ -181,17 +381,20 @@ public class ConnectionResource {
         return test(found.connector(), values, credentialName(request.credential()));
     }
 
-    /** Tests a connection with its settings and credential. */
+    /** Tests a connection that the person uses, with its settings and credential. */
     @POST
     @Path("connections/{id}/test")
     @Transactional
     public TestResult test(@PathParam("id") UUID id) {
-        Connection connection = find(id);
-        Discovery.Found found = available(connection);
+        Connection connection = find(id, USE);
+        Discovery.Found found = available(connection, catalog.discover());
         return test(found.connector(), connection.getSettings(), connection.getCredential());
     }
 
-    /** The contents of a connection at a path, its top level without one, as its connector lists them. */
+    /**
+     * The contents of a connection that the person uses at a path, its top level without one, as its
+     * connector lists them.
+     */
     @GET
     @Path("connections/{id}/contents")
     @Transactional
@@ -203,8 +406,8 @@ public class ConnectionResource {
         if (offset < 0 || limit < 1 || limit > MAX_PAGE) {
             throw problem(Response.Status.BAD_REQUEST, "offset is 0 or more, limit from 1 to " + MAX_PAGE);
         }
-        Connection connection = find(id);
-        Connector connector = available(connection).connector();
+        Connection connection = find(id, USE);
+        Connector connector = available(connection, catalog.discover()).connector();
         Page<Entry> page = withSettings(connection.getSettings(), connection.getCredential(), settings -> {
             try {
                 return connector.list(settings, path, new Paging(offset, limit));
@@ -259,13 +462,64 @@ public class ConnectionResource {
         }
     }
 
-    private Connection find(UUID id) {
-        return connections.findById(id).orElseThrow(NotFoundException::new);
+    /**
+     * A connection on which the person holds the level: 404 when they hold none, as when it does not
+     * exist, 403 when they hold a lower one.
+     */
+    private Connection find(UUID id, String level) {
+        Connection connection = connections.findById(id).orElseThrow(NotFoundException::new);
+        sharing.require(ref(id), level);
+        return connection;
+    }
+
+    private void forgetThumbnail(Connection connection) {
+        if (connection.getThumbnail() == null) {
+            return;
+        }
+        try {
+            files.delete(EXTENSION, connection.getThumbnail());
+        } catch (NoSuchElementException e) {
+            // Gone already: nothing to remove.
+        }
+    }
+
+    /** The reference of a connection in the registry of resources of the kernel. */
+    static ResourceRef ref(UUID id) {
+        return new ResourceRef(EXTENSION, TYPE, id.toString());
+    }
+
+    private static Resources.Details details(Connection connection) {
+        return Resources.Details.of(connection.getName(), "/app/connections/" + connection.getId());
+    }
+
+    private static String name(String requested) {
+        if (requested == null || requested.isBlank()) {
+            throw problem(Response.Status.BAD_REQUEST, "The name of the connection is required");
+        }
+        String name = requested.strip();
+        if (name.length() > Connection.MAX_NAME) {
+            throw problem(Response.Status.BAD_REQUEST, "The name is longer than " + Connection.MAX_NAME + " characters");
+        }
+        return name;
+    }
+
+    /** The description of a request, {@code null} when it is empty: saving it empty clears it. */
+    static String description(String requested) {
+        if (requested == null || requested.isBlank()) {
+            return null;
+        }
+        String description = requested.strip();
+        if (description.length() > Connection.MAX_DESCRIPTION) {
+            throw problem(
+                    Response.Status.BAD_REQUEST,
+                    "The description is longer than " + Connection.MAX_DESCRIPTION + " characters");
+        }
+        return description;
     }
 
     /** The connector of a connection, or 409 naming its extension when it is absent. */
-    private Discovery.Found available(Connection connection) {
-        return catalog.discover()
+    private static Discovery.Found available(Connection connection, Discovery discovery) {
+        return discovery
                 .connector(connection.getType())
                 .orElseThrow(() -> new WebApplicationException(Response.status(Response.Status.CONFLICT)
                         .type(MediaType.APPLICATION_JSON)
@@ -306,7 +560,13 @@ public class ConnectionResource {
                 declaration.form());
     }
 
-    private static ConnectionView view(Connection connection, Discovery discovery) {
+    /** A connection with its owner as the kernel keeps it. */
+    private ConnectionView view(Connection connection, Discovery discovery) {
+        UUID owner = resources.find(ref(connection.getId())).map(Resource::owner).orElse(null);
+        return view(connection, discovery, owner, new Names());
+    }
+
+    private ConnectionView view(Connection connection, Discovery discovery, UUID owner, Names names) {
         return new ConnectionView(
                 connection.getId(),
                 connection.getName(),
@@ -315,7 +575,22 @@ public class ConnectionResource {
                 discovery.connector(connection.getType()).isPresent(),
                 connection.getSettings(),
                 connection.getCredential(),
-                connection.getCreatedAt());
+                connection.getCreatedAt(),
+                connection.getDescription(),
+                connection.getAddress(),
+                owner == null ? null : new OwnerView(owner, names.of(owner)),
+                connection.getThumbnail(),
+                sharing.allows(ref(connection.getId()), EDIT));
+    }
+
+    /** The names of the people of the organization, each read once for an answer. */
+    private final class Names {
+        private final Map<UUID, Optional<String>> known = new HashMap<>();
+
+        String of(UUID account) {
+            return known.computeIfAbsent(account, _ -> people.find(account).map(People.Person::displayName))
+                    .orElse(null);
+        }
     }
 
     private static WebApplicationException problem(Response.Status status, String message) {

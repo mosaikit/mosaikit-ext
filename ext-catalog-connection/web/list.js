@@ -1,0 +1,247 @@
+// SPDX-FileCopyrightText: 2026 Massimo Antonini
+// SPDX-License-Identifier: MPL-2.0
+
+/**
+ * A list page with the shape of the other list pages of the platform (EXT-011): a header with the
+ * number of items and a switch between a grid of cards and rows, a column of facets that filters
+ * instead of navigating, each value with the number of items it matches, and the items. It knows
+ * nothing of connections: the page gives the facets, the card and the columns. When the list page of
+ * the UI kit of the platform is available, it takes the place of this module with the same inputs.
+ */
+
+/** The styles of the list page, with the --mk-* tokens of the theme. */
+export const LIST_STYLE = `
+  .list-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 16px 0 8px; }
+  .list-head .count { color: var(--mk-muted); font-size: 13px; }
+  .switch { display: inline-flex; border: 1px solid var(--mk-line); border-radius: var(--mk-radius); overflow: hidden; }
+  .switch button { border: 0; border-radius: 0; }
+  .switch button[aria-pressed='true'] { background: var(--mk-accent); color: var(--mk-accent-fg); }
+  .list-body { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 720px) { .list-body { grid-template-columns: minmax(0, 1fr); } }
+  .facets { display: grid; gap: 16px; }
+  .facet h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mk-muted); margin: 0 0 6px; }
+  .facet ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .facet label { display: flex; gap: 8px; align-items: center; padding: 4px 6px; border-radius: var(--mk-radius); cursor: pointer; }
+  .facet label:hover { background: var(--mk-surface); }
+  .facet .value { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .facet .number { color: var(--mk-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .facet .none { color: var(--mk-muted); font-size: 13px; }
+  ul.cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  ul.cards > li { min-width: 0; }
+`;
+
+/**
+ * A list page in an element.
+ *
+ * @param {HTMLElement} container where the list page is drawn
+ * @param {object} options
+ * @param {(item: object) => string} options.key the identifier of an item
+ * @param {{ id: string, title: string, values: (item: object) => { value: string, label: string }[] }[]} options.facets
+ *     the facets: a value is chosen among those of the items, several values of one facet add up, two
+ *     facets narrow each other
+ * @param {(item: object) => HTMLElement} options.card the card of an item in the grid
+ * @param {{ title: string, cell: (item: object) => Node | string }[]} options.columns the columns of the rows
+ * @param {object} options.labels the texts: count(n), view, grid, rows, filters, noMatch, empty, none
+ */
+export class ListPage {
+  constructor(container, options) {
+    this.options = options;
+    this.items = [];
+    this.view = 'grid';
+    /** The values chosen in each facet. */
+    this.chosen = new Map(options.facets.map((facet) => [facet.id, new Set()]));
+    const { labels } = options;
+    container.replaceChildren();
+    const head = document.createElement('div');
+    head.className = 'list-head';
+    this.count = document.createElement('span');
+    this.count.className = 'count';
+    const views = document.createElement('div');
+    views.className = 'switch';
+    views.setAttribute('role', 'group');
+    views.setAttribute('aria-label', labels.view);
+    this.switches = ['grid', 'rows'].map((view) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.view = view;
+      button.textContent = labels[view];
+      button.addEventListener('click', () => {
+        this.view = view;
+        this.render();
+      });
+      views.append(button);
+      return button;
+    });
+    head.append(this.count, views);
+    const body = document.createElement('div');
+    body.className = 'list-body';
+    this.facets = document.createElement('aside');
+    this.facets.className = 'facets';
+    this.facets.setAttribute('aria-label', labels.filters);
+    this.shown = document.createElement('div');
+    this.shown.className = 'items';
+    body.append(this.facets, this.shown);
+    container.append(head, body);
+  }
+
+  /** Shows these items, keeping the chosen values that are still among them. */
+  setItems(items) {
+    this.items = items;
+    for (const facet of this.options.facets) {
+      const present = new Set(items.flatMap((item) => facet.values(item).map((value) => value.value)));
+      const chosen = this.chosen.get(facet.id);
+      for (const value of [...chosen]) {
+        if (!present.has(value)) {
+          chosen.delete(value);
+        }
+      }
+    }
+    this.render();
+  }
+
+  /** Whether an item has one of the chosen values of each facet, leaving one facet out. */
+  matches(item, except) {
+    return this.options.facets.every((facet) => {
+      const chosen = this.chosen.get(facet.id);
+      return facet.id === except || chosen.size === 0 || facet.values(item).some((value) => chosen.has(value.value));
+    });
+  }
+
+  /** The items the chosen values let through. */
+  filtered() {
+    return this.items.filter((item) => this.matches(item));
+  }
+
+  render() {
+    const { labels } = this.options;
+    const items = this.filtered();
+    this.count.textContent = labels.count(items.length);
+    for (const button of this.switches) {
+      button.setAttribute('aria-pressed', String(button.dataset.view === this.view));
+    }
+    this.renderFacets();
+    if (this.items.length === 0 || items.length === 0) {
+      const message = document.createElement('p');
+      message.className = 'muted empty';
+      message.textContent = this.items.length === 0 ? labels.empty : labels.noMatch;
+      this.shown.replaceChildren(message);
+      return;
+    }
+    this.shown.replaceChildren(this.view === 'grid' ? this.grid(items) : this.rows(items));
+  }
+
+  /**
+   * Each facet lists only the values that the items have, each with the number of items it matches
+   * given the values chosen in the other facets.
+   */
+  renderFacets() {
+    const { labels } = this.options;
+    this.facets.replaceChildren(
+      ...this.options.facets.map((facet) => {
+        const section = document.createElement('section');
+        section.className = 'facet';
+        section.dataset.facet = facet.id;
+        const title = document.createElement('h2');
+        title.id = `facet-${facet.id}`;
+        title.textContent = facet.title;
+        section.setAttribute('aria-labelledby', title.id);
+        const counts = new Map();
+        for (const item of this.items) {
+          if (!this.matches(item, facet.id)) {
+            continue;
+          }
+          for (const { value, label } of facet.values(item)) {
+            const known = counts.get(value) ?? { label, count: 0 };
+            known.count++;
+            counts.set(value, known);
+          }
+        }
+        const chosen = this.chosen.get(facet.id);
+        const list = document.createElement('ul');
+        const values = [...counts.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
+        list.append(
+          ...values.map(([value, { label, count }]) => {
+            const item = document.createElement('li');
+            const choice = document.createElement('label');
+            const box = document.createElement('input');
+            box.type = 'checkbox';
+            box.value = value;
+            box.checked = chosen.has(value);
+            box.addEventListener('change', () => {
+              if (box.checked) {
+                chosen.add(value);
+              } else {
+                chosen.delete(value);
+              }
+              this.render();
+              this.facets.querySelector(`[data-facet="${facet.id}"] input[value="${CSS.escape(value)}"]`)?.focus();
+            });
+            const text = document.createElement('span');
+            text.className = 'value';
+            text.textContent = label;
+            const number = document.createElement('span');
+            number.className = 'number';
+            number.textContent = String(count);
+            choice.append(box, text, number);
+            item.append(choice);
+            return item;
+          }),
+        );
+        section.append(title, list);
+        if (values.length === 0) {
+          const none = document.createElement('p');
+          none.className = 'none';
+          none.textContent = labels.none;
+          section.append(none);
+        }
+        return section;
+      }),
+    );
+  }
+
+  grid(items) {
+    const list = document.createElement('ul');
+    list.className = 'cards';
+    list.append(
+      ...items.map((item) => {
+        const entry = document.createElement('li');
+        entry.dataset.id = this.options.key(item);
+        entry.append(this.options.card(item));
+        return entry;
+      }),
+    );
+    return list;
+  }
+
+  rows(items) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table';
+    const table = document.createElement('table');
+    const head = document.createElement('tr');
+    for (const column of this.options.columns) {
+      const cell = document.createElement('th');
+      cell.scope = 'col';
+      cell.textContent = column.title;
+      head.append(cell);
+    }
+    const thead = document.createElement('thead');
+    thead.append(head);
+    const body = document.createElement('tbody');
+    body.append(
+      ...items.map((item) => {
+        const row = document.createElement('tr');
+        row.dataset.id = this.options.key(item);
+        for (const column of this.options.columns) {
+          const cell = document.createElement('td');
+          cell.className = column.className ?? '';
+          cell.append(column.cell(item));
+          row.append(cell);
+        }
+        return row;
+      }),
+    );
+    table.append(thead, body);
+    wrapper.append(table);
+    return wrapper;
+  }
+}

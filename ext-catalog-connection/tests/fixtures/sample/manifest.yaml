@@ -21,4 +21,4 @@ libraries:
   # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
   - jar: 'lib/ext-catalog-connection-api-0.1.0.jar'
     coordinates: 'io.github.mosaikit.ext:ext-catalog-connection-api:0.1.0'
-    sha256: 'ca2d3f0e5c2d60c417dc56bf1a1ae96a314e0a2466d8d7ca0bac681d56c698e2'
+    sha256: '9db471bb52ce2ae9b8b81b6f79127cae4d136441e07f82de04dd59145d9af602'

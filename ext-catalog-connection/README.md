@@ -16,11 +16,44 @@ one `EXT-nnn.md` each, and its changes in [`CHANGELOG.md`](CHANGELOG.md).
 | `src/main/java/` | the backend: the connectors found through the contract, the connections, `/api/v1/ext/connections` |
 | `db/` | the migrations of the schema `ext_catalog_connection` |
 | `web/index.js` | the app, a custom element the shell renders at `/app/connections` |
+| `web/list.js` | the list page of the app: header with the count and the grid/rows switch, the column of filters, cards and rows |
+| `web/thumbnail.js` | the thumbnails generated from the names of the connections |
 | `web/i18n.js` | the texts of the app in English and Italian, chosen by `context.locale` |
 | `pom.xml` | the build, on the parent of Mosaikit extensions `io.github.mosaikit:mosaikit-extension-parent` |
 | `package.json`, `playwright.config.ts`, `tests/` | the bench of `@mosaikit/testing` and the Playwright tests |
-| `tests/fixtures/` | two connectors of the tests, built with the framework: a sample source, and one whose declaration lacks a field |
+| `tests/fixtures/` | two connectors of the tests, built with the framework: a sample source (two types, sample source and sample files), and one whose declaration lacks a field |
 | `docs/requirements/` | the requirements of this extension |
+
+## The list of connections
+
+Every connection the person views, whatever its connector, is a card of one grid, with rows next to
+it (EXT-011). The column of filters lists the types actually configured, each with the number of its
+connections, and filters instead of navigating: several types add up. Each card shows:
+
+- a **thumbnail**, the image uploaded for the connection (PNG, JPEG, GIF or WebP, at most 1 MB, kept in
+  the file service of the platform attached to the connection), or one generated from its name, whose
+  hue and silhouette come from a hash of the name, so that connections of one type do not look alike;
+- its **name**, and under it its **description**, or the **address of its source** when it has none
+  (EXT-015);
+- its **type**, with the logo of its connector, and its **owner**.
+
+Each connection is a resource of the platform (MK-054), of type `connection` with the levels `view`,
+`use`, `edit` and `manage`: the person who creates it owns it, and it is shared with the dialog of the
+platform. A person lists the connections they view, browses and tests those they use, and changes
+those they edit: name, description, settings, credential and thumbnail; the type never changes.
+
+| Request | Level | Answer |
+|---|---|---|
+| `GET /api/v1/ext/connections/connections` | `view` | the connections, with `description`, `address`, `owner`, `thumbnail` and `editable` |
+| `GET /api/v1/ext/connections/connections/{id}` | `view` | one connection |
+| `POST /api/v1/ext/connections/connections` | | creates one, owned by the person: `name`, `type`, `description`, `settings`, `credential` |
+| `PUT /api/v1/ext/connections/connections/{id}` | `edit` | changes `name`, `description` (empty clears it), `settings` and `credential` |
+| `PUT /api/v1/ext/connections/connections/{id}/thumbnail` | `edit` | uploads the thumbnail, the image as the body with its `Content-Type` |
+| `DELETE /api/v1/ext/connections/connections/{id}/thumbnail` | `edit` | back to the generated thumbnail |
+| `POST /api/v1/ext/connections/connections/{id}/test`, `GET .../{id}/contents` | `use` | test, contents |
+
+The list page has the shape of the list page of the UI kit of Mosaikit (MK-105) and takes the same
+inputs (facets, card, columns), so that the kit replaces `web/list.js` when it is published.
 
 ## Connectors
 
@@ -70,6 +103,11 @@ contracts:
   lists the connectors: a declaration that lacks a field, or has a wrong one, is refused with a
   problem naming the field, in the log of the installation, in `GET /api/v1/ext/connections/connectors`
   and in the app; the other connectors keep working.
+- **The address of the source**, which a card shows when the connection has no description: the
+  connector tells it from the settings with `address`, a default method of the contract, or the
+  framework takes it from the usual settings (`url`, `uri`, `endpoint`, `address`, `baseUrl`,
+  `server`, or `host` with `port` and `database`). It is kept with the connection when it is saved,
+  and never carries a user or a password.
 - **Credentials**: a connection names a credential that the administrators keep in Credentials (the
   secrets service of the platform); the framework reads it at the moment of a call and passes it in
   `ConnectionSettings`. The connector never keeps it, logs it or returns it, and no answer of the API

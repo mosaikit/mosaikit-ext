@@ -20,6 +20,19 @@ contracts:
     - name: connector
       versions: [1]
       api: io.github.mosaikit.ext:ext-catalog-connection-api
+# Each connection is a resource of the kernel (MK-054): the person who creates it owns it, and it is
+# shared with the dialog of the platform (MK-055). A person lists the connections they view, browses
+# and tests those they use, and changes those they edit (EXT-011, EXT-015).
+resources:
+  - type: connection
+    title: Connection
+    i18n: { it: { title: Connessione } }
+    levels:
+      - { name: view, title: View, i18n: { it: { title: Vedere } } }
+      - { name: use, title: Use, i18n: { it: { title: Usare } } }
+      - { name: edit, title: Edit, edits: true, i18n: { it: { title: Modificare } } }
+      - { name: manage, title: Manage, edits: true, i18n: { it: { title: Gestire } } }
+    subjects: [person, group, organization]
 frontend:
   entry: web/index.js
   isolation: module
@@ -41,4 +54,4 @@ libraries:
   # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
   - jar: 'lib/ext-catalog-connection-api-0.1.0.jar'
     coordinates: 'io.github.mosaikit.ext:ext-catalog-connection-api:0.1.0'
-    sha256: 'ca2d3f0e5c2d60c417dc56bf1a1ae96a314e0a2466d8d7ca0bac681d56c698e2'
+    sha256: '9db471bb52ce2ae9b8b81b6f79127cae4d136441e07f82de04dd59145d9af602'

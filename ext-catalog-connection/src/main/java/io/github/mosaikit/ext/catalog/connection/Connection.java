@@ -17,7 +17,9 @@ import java.util.UUID;
 /**
  * A connection of an organization to a data source (EXT-010): the type of its connector, the extension
  * that declared that type, the values of the connection form and the name of its credential in the
- * secrets service of the kernel, never the credential itself.
+ * secrets service of the kernel, never the credential itself; its description, the address of its
+ * source and the file of its thumbnail (EXT-011, EXT-015). Its owner and its grants are kept by the
+ * kernel, where the connection is a resource (MK-054).
  */
 @Entity
 @Table(name = "connection", schema = "ext_catalog_connection")
@@ -25,6 +27,9 @@ public class Connection {
 
     /** The longest name of a connection. */
     public static final int MAX_NAME = 200;
+
+    /** The longest description of a connection. */
+    public static final int MAX_DESCRIPTION = 1000;
 
     @Id
     private UUID id;
@@ -48,6 +53,15 @@ public class Connection {
     private Map<String, Object> settings;
 
     private String credential;
+
+    @Column(length = MAX_DESCRIPTION)
+    private String description;
+
+    @Column(length = Addresses.MAX)
+    private String address;
+
+    /** The file of the uploaded thumbnail in the file service of the kernel. */
+    private UUID thumbnail;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -104,5 +118,42 @@ public class Connection {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    /** The description, {@code null} without one. */
+    public String getDescription() {
+        return description;
+    }
+
+    /** The address of the source, as its connector told it when the connection was saved. */
+    public String getAddress() {
+        return address;
+    }
+
+    /** The file of the uploaded thumbnail, {@code null} when the thumbnail is generated from the name. */
+    public UUID getThumbnail() {
+        return thumbnail;
+    }
+
+    /** Changes the name. */
+    public void rename(String name) {
+        this.name = Objects.requireNonNull(name, "name");
+    }
+
+    /** Changes the description; {@code null} clears it. */
+    public void describe(String description) {
+        this.description = description;
+    }
+
+    /** Changes the values of the form, the credential and the address of the source they give. */
+    public void configure(Map<String, Object> settings, String credential, String address) {
+        this.settings = new LinkedHashMap<>(settings);
+        this.credential = credential;
+        this.address = address;
+    }
+
+    /** Sets the file of the uploaded thumbnail; {@code null} goes back to the generated one. */
+    public void thumbnail(UUID file) {
+        this.thumbnail = file;
     }
 }

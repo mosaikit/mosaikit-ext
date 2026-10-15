@@ -6,6 +6,7 @@ import jakarta.data.repository.Find;
 import jakarta.data.repository.Insert;
 import jakarta.data.repository.Query;
 import jakarta.data.repository.Repository;
+import jakarta.data.repository.Update;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,6 +29,13 @@ public interface Connections {
     @Query("select count(c) from Connection c where lower(c.name) = lower(:name)")
     long countByName(String name);
 
+    /** Whether the organization has another connection with this name, in any case. */
+    @Query("select count(c) from Connection c where lower(c.name) = lower(:name) and c.id <> :id")
+    long countOthersByName(String name, UUID id);
+
     @Insert
     void insert(Connection connection);
+
+    @Update
+    void update(Connection connection);
 }

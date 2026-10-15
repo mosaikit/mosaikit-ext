@@ -8,6 +8,16 @@ and the versions [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- All connections of an organization in one list, filtered by type (EXT-011): a grid of cards with
+  rows next to it, the Type filter computed from the connections with their numbers, and a thumbnail
+  for each connection, uploaded or generated from its name.
+- Every connection has an owner and a description (EXT-015): connections are resources of the
+  platform (MK-054), owned by the person who creates them and shared with the dialog of the platform;
+  the forms of creation and edit have a description under the name, and the card shows the
+  description or the address of the source, which a connector tells with the new default method
+  `Connector.address` of version 1 of the contract. Connections are changed with
+  `PUT /api/v1/ext/connections/connections/{id}`.
+
 - Connectors are extensions, discovered by the framework (EXT-010): the contract `connector`
   version 1, in the artifact `ext-catalog-connection-api`, with which a connector declares its type,
   title, logo, category and connection form, tests a connection and lists its contents. The app lists
