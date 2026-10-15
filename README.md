@@ -61,6 +61,63 @@ The history of the folder is kept and the package coordinates do not change. Wha
 repository takes from the root, by hand, is the licence (`LICENSE`, `LICENSES/`, `REUSE.toml`) and
 a CI workflow.
 
+## Releases
+
+Each extension is released on its own, with its own version, from a tag `ext-<name>/vX.Y.Z`
+(EXT-103): a fix to one extension does not release the others. A release publishes only that
+extension, as `io.github.mosaikit.ext:ext-<name>` version X.Y.Z: its package zip in Maven Central,
+where Mosaikit publishes its Maven artifacts, and attached to a GitHub release of the tag, whose
+notes are the section of that version in the extension's `CHANGELOG.md`.
+
+1. In the folder, set the version in `pom.xml`, `manifest.yaml` and `package.json`, and give the
+   entries of `## [Unreleased]` in `CHANGELOG.md` a section `## [X.Y.Z] - <date>`.
+2. `python tools/release.py check ext-<name>/vX.Y.Z` passes; merge.
+3. A maintainer tags the merged commit and pushes the tag.
+
+`tools/release.py` (`pip install pyyaml`) holds what a release decides, and the release workflow only
+calls it: `check` refuses a tag whose version differs from the build, the manifest or `package.json`,
+a version without its changelog section, a parent POM that is still a snapshot, or a required
+extension that is not in this repository; `notes` prints the release notes; `bundle` and `publish`
+build and upload the bundle of the Central Portal; `closure` lists what a product gets with an
+extension. Its tests are in `tools/test_release.py`.
+
+### Getting an extension in a product
+
+A product declares each extension it installs by package and version. The published POM of an
+extension declares, as dependencies of type `zip`, the extensions its manifest `requires`, with the
+range of versions of the manifest (MK-132); the ones it uses only when present (`optional`) are not
+dependencies. So Maven brings the extension and the extensions it requires, and nothing else:
+
+```xml
+<dependency>
+  <groupId>io.github.mosaikit.ext</groupId>
+  <artifactId>ext-catalog-connection-postgres</artifactId>
+  <version>0.1.0</version>
+  <type>zip</type>
+</dependency>
+<!-- in the build of the distribution: every extension zip into extensions/ -->
+<plugin>
+  <groupId>org.apache.maven.plugins</groupId>
+  <artifactId>maven-dependency-plugin</artifactId>
+  <executions>
+    <execution>
+      <id>extensions</id>
+      <phase>package</phase>
+      <goals><goal>copy-dependencies</goal></goals>
+      <configuration>
+        <includeTypes>zip</includeTypes>
+        <outputDirectory>${project.build.directory}/extensions</outputDirectory>
+      </configuration>
+    </execution>
+  </executions>
+</plugin>
+```
+
+Without Maven, `gh release download ext-<name>/vX.Y.Z --repo mosaikit/mosaikit-ext --pattern '*.zip'`
+downloads one package; its release notes name the extensions it requires.
+`python tools/release.py closure ext-catalog-connection-postgres` lists them from the manifests of the
+repository.
+
 ## Naming
 
 - Folders and artifacts are `ext-<extension>[-<sub>]...`: `ext-catalog`, `ext-catalog-connection`,
