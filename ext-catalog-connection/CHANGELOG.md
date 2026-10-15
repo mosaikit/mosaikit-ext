@@ -8,5 +8,11 @@ and the versions [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Connectors are extensions, discovered by the framework (EXT-010): the contract `connector`
+  version 1, in the artifact `ext-catalog-connection-api`, with which a connector declares its type,
+  title, logo, category and connection form, tests a connection and lists its contents. The app lists
+  the connections of the organization and creates new ones with the form of the connector; a connector
+  whose declaration lacks a field is refused naming it, and the connections of a connector that is no
+  longer active stay listed as unavailable until it comes back.
 - The folder builds and tests alone on the parent of Mosaikit extensions and the bench of
   `@mosaikit/testing`: manifest, an app page in English and Italian, and its first test (EXT-102).

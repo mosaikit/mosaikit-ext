@@ -11,12 +11,15 @@
       A project of its own (ADR-0001): its parent is the published parent of Mosaikit extensions, never a
       POM of this repository (hence the empty relativePath).
 
-        mvn package    target/ext-catalog-connection-0.1.0.zip, the package of the extension
+        mvn -f api/pom.xml install    the API of the connectors, once and after each change of api/
+        mvn package    lib/ext-catalog-connection.jar with the API next to it,
+                       target/ext-catalog-connection-0.1.0.zip, and the connectors of the tests
+                       (tests/fixtures/*), each in its target/
         mvn verify     also the tests of tests/ on the bench of @mosaikit/testing (npm test)
 
-      With Java code: remove the packaging line, add the APIs of the kernel with scope provided
-      (io.github.mosaikit:mosaikit-kernel-api and the Quarkus extensions it uses, as the samples do), and
-      declare backend.jar: lib/ext-catalog-connection.jar in manifest.yaml.
+      The contract of the connectors (EXT-010, MK-134) is the artifact ext-catalog-connection-api, built
+      from api/: the framework and every connector bring it as a library. Maven resolves the
+      dependencies of a project before any plugin of its build can run, so api/ is installed apart.
     -->
     <parent>
         <groupId>io.github.mosaikit</groupId>
@@ -27,7 +30,6 @@
     <groupId>io.github.mosaikit.ext</groupId>
     <artifactId>ext-catalog-connection</artifactId>
     <version>0.1.0</version>
-    <packaging>pom</packaging>
     <name>Connections</name>
     <description>The framework of connections to data sources, with their list, creation, detail, picker and credentials.</description>
     <url>https://github.com/mosaikit/mosaikit-ext/tree/main/ext-catalog-connection</url>
@@ -36,4 +38,78 @@
         <connection>scm:git:https://github.com/mosaikit/mosaikit-ext.git</connection>
         <developerConnection>scm:git:git@github.com:mosaikit/mosaikit-ext.git</developerConnection>
     </scm>
+    <dependencies>
+        <dependency>
+            <groupId>io.github.mosaikit.ext</groupId>
+            <artifactId>ext-catalog-connection-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.mosaikit</groupId>
+            <artifactId>mosaikit-kernel-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-jackson</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-hibernate-orm</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-security</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.data</groupId>
+            <artifactId>jakarta.data-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <!-- After the package of the framework, the connectors that its tests install
+                     (tests/fixtures), on the API of the contract in the local Maven repository. -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-invoker-plugin</artifactId>
+                <version>3.9.1</version>
+                <configuration>
+                    <projectsDirectory>${project.basedir}</projectsDirectory>
+                    <localRepositoryPath>${settings.localRepository}</localRepositoryPath>
+                    <streamLogs>true</streamLogs>
+                    <noLog>true</noLog>
+                    <showErrors>true</showErrors>
+                    <properties>
+                        <skip.npm>true</skip.npm>
+                    </properties>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>test-connectors</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <pomIncludes>
+                                <pomInclude>tests/fixtures/*/pom.xml</pomInclude>
+                            </pomIncludes>
+                            <goals>
+                                <goal>package</goal>
+                            </goals>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

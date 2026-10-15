@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 Massimo Antonini
+# SPDX-License-Identifier: MPL-2.0
+# A connector of the tests of the connection framework (EXT-010): it implements the contract of the
+# framework and nothing in the framework names it.
+id: org.example.connector.sample
+version: 0.1.0
+name: Sample connector
+description: A connector of the tests of the connection framework, a source with a few entries in memory.
+kind: [service]
+platform: '>=0.1 <1'
+backend:
+  jar: lib/connector-sample.jar
+  # Required with Java code, although a connector serves no REST resource of its own.
+  api: connector-sample
+contracts:
+  implements:
+    - contract: io.github.mosaikit.ext.catalog.connection/connector
+      version: 1
+      api: io.github.mosaikit.ext:ext-catalog-connection-api
+libraries:
+  # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
+  - jar: 'lib/ext-catalog-connection-api-0.1.0.jar'
+    coordinates: 'io.github.mosaikit.ext:ext-catalog-connection-api:0.1.0'
+    sha256: 'ca2d3f0e5c2d60c417dc56bf1a1ae96a314e0a2466d8d7ca0bac681d56c698e2'

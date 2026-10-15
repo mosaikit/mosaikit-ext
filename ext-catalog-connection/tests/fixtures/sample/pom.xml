@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 Massimo Antonini
+  SPDX-License-Identifier: MPL-2.0
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <!--
+      A connector of the tests of the connection framework: a source with a few entries, in memory.
+      Built by the build of the framework (mvn package, after the API of the contract is installed) into
+      target/connector-sample-0.1.0.zip, which tests/global-setup.ts installs next to the framework (EXT-010).
+    -->
+    <parent>
+        <groupId>io.github.mosaikit</groupId>
+        <artifactId>mosaikit-extension-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath/>
+    </parent>
+    <groupId>org.example</groupId>
+    <artifactId>connector-sample</artifactId>
+    <version>0.1.0</version>
+    <description>A connector of the tests of the connection framework: a source with a few entries, in memory.</description>
+    <properties>
+        <extension.package.name>connector-sample</extension.package.name>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>io.github.mosaikit.ext</groupId>
+            <artifactId>ext-catalog-connection-api</artifactId>
+            <version>0.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.mosaikit</groupId>
+            <artifactId>mosaikit-kernel-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+</project>

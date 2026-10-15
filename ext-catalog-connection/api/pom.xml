@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 Massimo Antonini
+  SPDX-License-Identifier: MPL-2.0
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <!--
+      The API of the contract "connector" of the connection framework (EXT-010, MK-134): the interfaces
+      and records that a connector implements, and nothing else. The framework and every connector bring
+      it as a library; the kernel loads it once, in the highest version of the same major version. A
+      breaking change is a new interface in a new package (api.v2) next to this one, in a minor release;
+      the major version changes only when an old interface is retired.
+
+      The build of the framework (../pom.xml) installs it in the local Maven repository before its own
+      compilation; it is released with the framework.
+    -->
+    <groupId>io.github.mosaikit.ext</groupId>
+    <artifactId>ext-catalog-connection-api</artifactId>
+    <version>0.1.0</version>
+    <name>Connections :: connector API</name>
+    <description>The contract between the connection framework and its connectors.</description>
+    <url>https://github.com/mosaikit/mosaikit-ext/tree/main/ext-catalog-connection/api</url>
+    <licenses>
+        <license>
+            <name>MPL-2.0</name>
+            <url>https://mozilla.org/MPL/2.0/</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+    <scm>
+        <url>https://github.com/mosaikit/mosaikit-ext</url>
+        <connection>scm:git:https://github.com/mosaikit/mosaikit-ext.git</connection>
+        <developerConnection>scm:git:git@github.com:mosaikit/mosaikit-ext.git</developerConnection>
+    </scm>
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>25</maven.compiler.release>
+        <!-- The same bytes at every build: the manifests that list the library keep its digest. -->
+        <project.build.outputTimestamp>2026-10-15T00:00:00Z</project.build.outputTimestamp>
+        <mosaikit.version>0.1.0-SNAPSHOT</mosaikit.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>io.github.mosaikit</groupId>
+            <artifactId>mosaikit-kernel-api</artifactId>
+            <version>${mosaikit.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-install-plugin</artifactId>
+                <version>3.1.4</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.4</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
