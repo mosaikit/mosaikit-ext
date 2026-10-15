@@ -482,10 +482,15 @@ const extension = {
         if (push) {
           history.pushState(null, '', address(id));
         }
+        // The last navigation wins: an answer to an earlier one, arriving later, is dropped.
+        const ticket = (this.navigation = (this.navigation ?? 0) + 1);
         const query = `sort=${this.sort}&order=${this.order}`;
         const url =
           id === SHARED ? `${SHARED_API}?${query}` : id ? `${API}/${encodeURIComponent(id)}?${query}` : `${API}?${query}`;
         const response = await context.fetch(url);
+        if (ticket !== this.navigation) {
+          return;
+        }
         if (response.status === 404) {
           this.current = null;
           this.sheet = null;
@@ -499,6 +504,9 @@ const extension = {
           return;
         }
         const folder = await response.json();
+        if (ticket !== this.navigation) {
+          return;
+        }
         this.sheet = null;
         if ((this.current?.id ?? null) !== (id ?? null)) {
           this.selected = new Set();
@@ -543,7 +551,12 @@ const extension = {
         if (push) {
           history.pushState(null, '', fileAddress(id));
         }
+        // The last navigation wins: an answer to an earlier one, arriving later, is dropped.
+        const ticket = (this.navigation = (this.navigation ?? 0) + 1);
         const response = await context.fetch(`${FILES_API}/${encodeURIComponent(id)}`);
+        if (ticket !== this.navigation) {
+          return;
+        }
         if (response.status === 404) {
           this.current = null;
           this.sheet = null;
@@ -557,6 +570,9 @@ const extension = {
           return;
         }
         const sheet = await response.json();
+        if (ticket !== this.navigation) {
+          return;
+        }
         this.sheet = sheet;
         this.current = null;
         this.selected = new Set();

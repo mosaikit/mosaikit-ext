@@ -110,6 +110,10 @@ test('EXT-003 sharing a folder with a group gives its members the folder and eve
   expect(inside.items.map((item) => item.name)).toEqual(['minutes.txt']);
   expect((await api(member(), `${API}/folders/${theirs.id}`)).status).toBe(200);
 
+  await expect
+    .poll(async () => ((await api(member(1), `${API}/folders/${reports.id}`)).body as Folder).items.map((i) => i.name))
+    .toEqual(['Added later', 'By the colleague']);
+
   // In the app, the folder is in the Shared with me of the colleague and opens with all it holds.
   expect(await sharedWithColleague()).toContain(top.id);
   await page.context().clearCookies();
