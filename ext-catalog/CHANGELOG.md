@@ -35,6 +35,18 @@ and the versions [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Documents linked to resources of other extensions (EXT-006): the contract
+  `io.github.mosaikit.ext.catalog/linked-documents` version 1, `LinkedDocuments` in
+  `io.github.mosaikit.ext:ext-catalog-api` 1.2.0 (a minor release); `GET`/`POST /links`,
+  `DELETE /links/{id}`, and the element `mosaikit-ext-catalog-documents` for the sheet of a resource of
+  another extension. The sheet of a file (`/app/catalog?file=<id>`, `GET /files/{id}`) shows its links,
+  each resolved by the kernel, or the placeholder of the platform while the extension of the resource is
+  absent (MK-135). Schema `V5`: `document_link`.
+- The search of folders and files, `GET /search` (EXT-006), contributed as the provider `files` of the
+  search of the platform (`search.provider`, MK-040), with a full-text index on the names (`V5`).
+- Files are registered with the platform at their sheet, `/app/catalog?file=<id>`, instead of their
+  folder, when they are stored, renamed or moved.
+
 - `CatalogFile.link(Duration)` in `io.github.mosaikit.ext:ext-catalog-api` 1.1.0, a minor release of
   the contract `file-kind` version 1 (EXT-107): a signed, expiring link of the platform to the content
   of a file of the kind (MK-093), which a process of its extension reads outside the request of a

@@ -13,14 +13,15 @@ one `EXT-nnn.md` each, and its changes in [`CHANGELOG.md`](CHANGELOG.md).
 |---|---|
 | `manifest.yaml` | identity, backend, schema, resource types, frontend and contributions of the extension |
 | `src/main/java/` | the backend: the REST API under `/api/v1/ext/catalog` and the tree of folders and files |
-| `db/` | the migrations of the schema `ext_catalog`: the tree (`V1`), kinds of files (`V3`); `V2` kept downloads and pending removals for jobs, which `V4` drops |
-| `api/` | `io.github.mosaikit.ext:ext-catalog-api`, the contracts that other extensions implement (EXT-105, EXT-107): a library of the catalog and of those extensions |
+| `db/` | the migrations of the schema `ext_catalog`: the tree (`V1`), kinds of files (`V3`), links of documents to resources of other extensions and the index of the search (`V5`); `V2` kept downloads and pending removals for jobs, which `V4` drops |
+| `api/` | `io.github.mosaikit.ext:ext-catalog-api`, the contracts that other extensions implement (EXT-105, EXT-107, EXT-006): a library of the catalog and of those extensions |
 | `web/index.js` | the app, a custom element the shell renders at `/app/catalog`; `web/drop.js` reads what is dropped or chosen, `web/zip.js` writes the archive of a download |
 | `web/i18n.js` | the texts of the app in English and Italian, chosen by `context.locale` |
 | `pom.xml` | the build, on the parent of Mosaikit extensions `io.github.mosaikit:mosaikit-extension-parent` |
 | `src/test/java/` | the unit tests of the backend |
 | `package.json`, `playwright.config.ts`, `tests/` | the bench of `@mosaikit/testing` and the Playwright tests |
 | `tests/fixtures/text-notes/` | an extension that adds the kind "text note" through the contract, installed with the catalog by the tests |
+| `tests/fixtures/records/` | an extension whose records take documents through the contract `linked-documents` (EXT-006), installed with the catalog by the tests |
 | `docs/requirements/` | the requirements of this extension |
 
 ## Folders and files
@@ -54,6 +55,11 @@ does not exist.
 | `DELETE /api/v1/ext/catalog/items/{id}` | deletes the item and everything it holds, with the level edit, from the catalog and from the file service |
 | `POST /api/v1/ext/catalog/downloads` | `{ "items", "name"?, "validFor"? }`: one file, or the entries of an archive (`path`, and `url` for a file), each with a signed link of the kernel made for the person, valid `validFor` seconds (300 unless given, at most 3600), and `expires` |
 | `PUT /api/v1/ext/catalog/items/{id}/content` | replaces the content of a file with the body and its `Content-Type`, with the level edit, also through a folder above it (MK-136); the file keeps its identifier, name, folder and shares |
+| `GET /api/v1/ext/catalog/files/{id}` | the sheet of a file (EXT-006): `file` as a list shows it, `path` (the folders above it that the person reads) and `links`, the resources of other extensions it is linked to; `404` for a folder or a file the person cannot read |
+| `GET /api/v1/ext/catalog/search?q=&tsquery=&kind=&offset=&limit=` | folders and files whose name has words starting with the words of `q`, best first, only those the person reads (EXT-006): `{ results: [{ title, detail, link, resource: { type, id } }], more }`; `kind=file` or `folder` for only those; `limit` at most 50 |
+| `GET /api/v1/ext/catalog/links?extension=&type=&id=` | the documents linked to a resource of another extension that the person reads, and `canLink`; `404` when they cannot read the resource or its extension is absent |
+| `POST /api/v1/ext/catalog/links` | `{ "file", "resource": { "extension", "type", "id" } }`: links a file the person reads to a resource they read, when its extension lets them (`403` otherwise); `201`, or `200` with the link already there |
+| `DELETE /api/v1/ext/catalog/links/{id}` | removes a link, for those who edit the document or whom the extension of the resource lets link documents to it |
 
 A file in a list also has its `contentType` and `fileKind`: `{ "extension", "name", "state",
 "stateDetail" }` when an extension active in the organization recognized it (EXT-105), `null`
@@ -272,6 +278,72 @@ link to its content (EXT-004). An action opens in a dialog; when it changed the 
 [`tests/fixtures/text-notes`](tests/fixtures/text-notes) is a complete example, which the tests
 install with the catalog; its app lets the tests turn it off in the organization.
 
+## Documents and their links
+
+A file has its **sheet** at `/app/catalog?file=<id>`, where the platform opens it from its search and
+its registry (EXT-006): what it is, its folder, owner and last change, who has access, *Download*
+(through a signed, expiring link, EXT-004) and the resources of other extensions it is linked to. The
+detail of a file in a list shows the same links, and its name opens the sheet.
+
+**Search.** The catalog is a provider of the search of the platform (point `search.provider`, MK-040):
+the platform calls `GET /api/v1/ext/catalog/search` as the person, and the catalog searches the words
+of the names of folders and files with the full-text search of PostgreSQL, keeping in the same query
+only what the person reads, also through a folder above it (`mk_kernel.allows`, MK-136). Each result
+names its item as a resource, which the platform checks again.
+
+**Linked to resources of other extensions.** A report next to the connection it describes, an act next
+to the dashboard it explains: other extensions take documents on their resources through the contract
+`io.github.mosaikit.ext.catalog/linked-documents` version 1 (`ext-catalog-api` 1.2.0). The extension
+declares the contract and implements `LinkedDocuments` in an `@ApplicationScoped` bean: the types of its
+resources that take documents, and whether the person of the request may link documents to one of them
+(and remove the links), such as one who edits it.
+
+```yaml
+optional:
+  io.github.mosaikit.ext.catalog: '>=0.1 <1'
+contracts:
+  implements:
+    - contract: io.github.mosaikit.ext.catalog/linked-documents
+      version: 1
+      api: io.github.mosaikit.ext:ext-catalog-api
+```
+
+```java
+@ApplicationScoped
+public class ConnectionDocuments implements LinkedDocuments {
+    @Inject Sharing sharing;
+    public String extension() { return "org.example.connections"; }
+    public Set<String> types() { return Set.of("connection"); }
+    public boolean mayLink(String type, String id) {
+        return sharing.allows(new ResourceRef(extension(), type, id), "edit");
+    }
+}
+```
+
+The catalog keeps each link as the reference by which the extension registered the resource with the
+platform (MK-054). It links a document when the person reads it and the resource, and the extension,
+active in the organization, lets them; it lists the documents of a resource to those who read the
+resource, each document only to those who read it. On the sheet of the resource, the frontend of the
+extension shows them with the element `mosaikit-ext-catalog-documents` that the catalog defines (for
+frontends loaded as modules, while the catalog is active, `context.extensions.isActive`): given the
+resource in its property `resource` and its name in the attribute `label`, it lists the documents, each
+opening its sheet and with *Download*, and to those who may, *Link a document* (found by name) and
+*Remove link*.
+
+```js
+const documents = document.createElement('mosaikit-ext-catalog-documents');
+documents.setAttribute('label', connection.title);
+documents.resource = { extension: 'org.example.connections', type: 'connection', id: connection.id };
+sheet.append(documents);
+```
+
+On the sheet of the document, the kernel resolves each linked resource for the person (MK-135): its
+title, which opens it, or, while its extension is not installed, not able to run or turned off, the
+placeholder of the platform (`mk-reference-placeholder`), which tells administrators which extension to
+install or turn on. The link stays, and the sheet shows the resource again without a reload when the
+extension comes back. A link goes with its document; a link to a resource that is gone stays, shown as
+not available. [`tests/fixtures/records`](tests/fixtures/records) is a complete example.
+
 ## Build and test
 
 Java 25, Maven and Node.js 24, from this folder:
@@ -279,6 +351,7 @@ Java 25, Maven and Node.js 24, from this folder:
 ```bash
 mvn -f api install                       # the API of the contracts of the catalog, first (EXT-105)
 mvn -f tests/fixtures/text-notes package # the fixture of the tests of the kinds of files
+mvn -f tests/fixtures/records package    # the fixture of the tests of the linked documents
 mvn package    # target/ext-catalog-0.1.0.zip, the package to install
 mvn verify     # also the tests of tests/, on a Mosaikit installation started for them
 npm test       # the same tests, after mvn package

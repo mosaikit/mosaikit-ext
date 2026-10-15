@@ -261,7 +261,7 @@ public class CatalogResource {
         String type = contentType == null || contentType.isBlank() ? MediaType.APPLICATION_OCTET_STREAM : contentType;
         UUID itemId = UUID.randomUUID();
         ResourceRef ref = Tree.ref(Item.FILE, itemId);
-        resources.register(ref, new Resources.Details(name, link(folder.getId()), Tree.ref(folder)));
+        resources.register(ref, new Resources.Details(name, fileLink(itemId), Tree.ref(folder)));
         FileKinds.Head head = FileKinds.head(content);
         StoredFile stored;
         try {
@@ -293,6 +293,18 @@ public class CatalogResource {
     }
 
     List<ItemView> views(Tree tree, List<Item> list, Comparator<Item> comparator) {
+        return views(items, resources, people, kinds, tree, list, comparator);
+    }
+
+    /** The views of items as the person of the request sees them, in the order given. */
+    static List<ItemView> views(
+            Items items,
+            Resources resources,
+            People people,
+            FileKinds kinds,
+            Tree tree,
+            List<Item> list,
+            Comparator<Item> comparator) {
         List<UUID> folders = list.stream().filter(Item::isFolder).map(Item::getId).toList();
         Map<UUID, Long> counts = folders.isEmpty()
                 ? Map.of()
@@ -310,7 +322,7 @@ public class CatalogResource {
                         item.getName(),
                         item.getSize(),
                         item.isFolder() ? counts.getOrDefault(item.getId(), 0L).intValue() : null,
-                        owner(item, owners),
+                        owner(resources, people, item, owners),
                         item.getChangedAt(),
                         tree.sharingState(item),
                         tree.level(item),
@@ -319,7 +331,7 @@ public class CatalogResource {
                 .toList();
     }
 
-    private Owner owner(Item item, Map<UUID, Optional<Owner>> owners) {
+    private static Owner owner(Resources resources, People people, Item item, Map<UUID, Optional<Owner>> owners) {
         UUID account = resources.find(Tree.ref(item)).map(Resource::owner).orElse(null);
         if (account == null) {
             return null;
@@ -400,6 +412,11 @@ public class CatalogResource {
     /** Where a folder opens in the shell. */
     static String link(UUID folder) {
         return "/app/catalog?folder=" + folder;
+    }
+
+    /** Where the sheet of a file opens in the shell (EXT-006). */
+    static String fileLink(UUID file) {
+        return "/app/catalog?file=" + file;
     }
 
     /** The same answer for a folder that does not exist and for one the person cannot read. */

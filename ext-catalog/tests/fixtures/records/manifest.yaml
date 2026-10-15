@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 Massimo Antonini
+# SPDX-License-Identifier: MPL-2.0
+#
+# A fixture of the tests of the catalog (EXT-006): records, resources of an extension to which documents
+# of the catalog are linked through its contract linked-documents (MK-134), as an extension of
+# connections or dashboards would take reports and acts. The sheet of a record lists its documents with
+# the element of the catalog; its app is turned off in an organization to make the extension absent
+# there (MK-133, MK-135).
+id: org.example.records
+version: 0.1.0
+name: Records (fixture)
+description: Resources of the tests of the catalog, to which documents are linked.
+kind: [app, service]
+platform: '>=0.1 <1'
+# The catalog is used when it is there: without it, records have no documents.
+optional:
+  io.github.mosaikit.ext.catalog: '>=0.1 <1'
+backend:
+  jar: lib/fixture-records.jar
+  api: records
+contracts:
+  implements:
+    - contract: io.github.mosaikit.ext.catalog/linked-documents
+      version: 1
+      api: io.github.mosaikit.ext:ext-catalog-api
+resources:
+  - type: record
+    title: Record
+    i18n: { it: { title: Scheda } }
+    levels:
+      - { name: view, title: View, i18n: { it: { title: Vedere } } }
+      - { name: edit, title: Edit, edits: true, i18n: { it: { title: Modificare } } }
+    subjects: [person, group, organization]
+frontend:
+  entry: web/index.js
+  isolation: module
+contributes:
+  # Turning its app off in an organization turns the extension off there (MK-030, MK-133).
+  rail.app:
+    - id: records
+      title: Records
+      route: /app/records
+      element: example-records-app
+      order: 91
+      i18n:
+        it: { title: Schede }
+libraries:
+  # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
+  - jar: 'lib/ext-catalog-api-1.2.0.jar'
+    coordinates: 'io.github.mosaikit.ext:ext-catalog-api:1.2.0'
+    sha256: '59b3230e5ddf09412fe40695d11af002434900ef781c699a5e96c545769b2d64'

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 Massimo Antonini
+  SPDX-License-Identifier: MPL-2.0
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <!--
+      A fixture of the tests of the catalog (EXT-006): an extension whose resources, records, take
+      documents of the catalog through its contract linked-documents, as an extension of connections or
+      dashboards would. It brings the API of the catalog as a library, never its classes.
+
+        mvn -f ../../../api install    the API of the catalog, first
+        mvn package                    target/fixture-records-0.1.0.zip, which the tests install
+    -->
+    <parent>
+        <groupId>io.github.mosaikit</groupId>
+        <artifactId>mosaikit-extension-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath/>
+    </parent>
+    <groupId>org.example</groupId>
+    <artifactId>fixture-records</artifactId>
+    <version>0.1.0</version>
+    <name>Records (fixture)</name>
+    <description>Resources of the tests of the catalog to which documents are linked: records, with a sheet that lists their documents.</description>
+    <properties>
+        <!-- The fixture is installed by the tests of the catalog, which build its package. -->
+        <skip.npm>true</skip.npm>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>io.github.mosaikit</groupId>
+            <artifactId>mosaikit-kernel-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.mosaikit.ext</groupId>
+            <artifactId>ext-catalog-api</artifactId>
+            <version>1.2.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-jackson</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-hibernate-orm</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-security</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -272,9 +272,7 @@ public class ItemResource {
         ResourceRef parent = item.getParentId() == null
                 ? null
                 : tree.item(item.getParentId()).map(Tree::ref).orElse(null);
-        String link = item.isFolder()
-                ? CatalogResource.link(item.getId())
-                : item.getParentId() == null ? "/app/catalog" : CatalogResource.link(item.getParentId());
+        String link = item.isFolder() ? CatalogResource.link(item.getId()) : CatalogResource.fileLink(item.getId());
         resources.register(Tree.ref(item), new Resources.Details(item.getName(), link, parent));
     }
 }
