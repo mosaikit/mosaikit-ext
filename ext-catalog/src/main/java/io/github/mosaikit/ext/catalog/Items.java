@@ -39,6 +39,10 @@ public interface Items {
     @Query("from Item i")
     List<Item> all();
 
+    /** Every file of the organization (EXT-105). */
+    @Query("from Item i where i.kind = 'file'")
+    List<Item> files();
+
     @Insert
     void insert(Item item);
 

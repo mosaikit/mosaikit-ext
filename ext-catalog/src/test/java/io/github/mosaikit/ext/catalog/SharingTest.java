@@ -252,6 +252,11 @@ class SharingTest {
         }
 
         @Override
+        public List<Item> files() {
+            return all.values().stream().filter(item -> !item.isFolder()).toList();
+        }
+
+        @Override
         public void insert(Item item) {
             all.put(item.getId(), item);
         }

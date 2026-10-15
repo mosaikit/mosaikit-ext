@@ -18,6 +18,15 @@ import { zip } from './zip.js';
  * with Move; renamed, deleted and downloaded with the buttons above the list (EXT-002). The same works
  * by keyboard, on a row of the list or a folder of the tree: F2 renames, Delete deletes, Ctrl+X then
  * Ctrl+V moves into the folder that has the focus, or into the open folder.
+ *
+ * Other extensions add kinds of files (EXT-105): a file of a kind shows the icon of the kind, its title
+ * and the state the kind recorded, and its actions, in the list and in its detail, which also shows its
+ * preview. They contribute them to the point catalog.file-kind (version 1), whose contributions the app
+ * reads with context.contributionsTo: { kind, title, icon, preview, states, actions: [{ id, title,
+ * element }] }, the texts in other languages in i18n (title, state.<state>, action.<id>). The preview and
+ * each action are custom elements of the extension, given the file in their property file; an action
+ * that changed the file says so with the event catalog-file-changed. Without the extension, its files
+ * are plain files.
  */
 
 const ELEMENT = 'mosaikit-ext-catalog';
@@ -26,6 +35,10 @@ const SHARED_API = '/api/v1/ext/catalog/shared';
 const ITEMS_API = '/api/v1/ext/catalog/items';
 const UPLOADS_API = '/api/v1/ext/catalog/uploads';
 const DOWNLOADS_API = '/api/v1/ext/catalog/downloads';
+/** The extension point of the kinds of files of other extensions, version 1 (EXT-105). */
+const FILE_KINDS = 'catalog.file-kind';
+/** Where the shell serves the files of an extension, such as the icon of a kind. */
+const ASSETS = '/api/v1/extension-assets';
 const ROUTE = '/app/catalog';
 const ROOT = 'root';
 /** The view Shared with me, where a folder id would be: never the id of a folder. */
@@ -39,6 +52,8 @@ const ICONS = {
   folder:
     '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M1.5 3A1.5 1.5 0 0 1 3 1.5h3.4l1.5 1.5H13A1.5 1.5 0 0 1 14.5 4.5v8A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
   file: '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3.5 1.5h6l3 3v10h-9zm6 0v3h3" opacity=".85"/></svg>',
+  details:
+    '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zm0 1.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM7.25 7h1.5v4.5h-1.5zM8 4.25a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8z"/></svg>',
 };
 
 const STYLE = `
@@ -111,6 +126,22 @@ const STYLE = `
   dialog [role='alert'] { color: var(--mk-danger); min-height: 1.2em; margin: 8px 0 0; }
   dialog ul.folders { list-style: none; margin: 8px 0; padding: 0; max-height: 280px; overflow-y: auto; }
   dialog ul.folders li { padding: 2px 0; }
+  td.name img.kind { width: 16px; height: 16px; flex: none; }
+  .badge { display: inline-block; font-size: 12px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--mk-line);
+           color: var(--mk-muted); white-space: nowrap; }
+  .badge.state { border-color: var(--mk-accent); color: var(--mk-accent); }
+  td.name .row-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+  td.name .row-actions button, section.detail .kind-actions button { padding: 2px 8px; font-size: 13px; }
+  td.name .row-actions button.details { display: inline-flex; align-items: center; padding: 3px 6px; color: var(--mk-muted); }
+  section.detail { margin-top: 16px; border-top: 1px solid var(--mk-line); padding-top: 12px; }
+  section.detail header { align-items: center; }
+  section.detail h2 { margin: 0; font-size: 16px; overflow-wrap: anywhere; display: flex; gap: 8px; align-items: center; }
+  section.detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0; }
+  section.detail dt { color: var(--mk-muted); }
+  section.detail dd { margin: 0; overflow-wrap: anywhere; }
+  section.detail .preview { border: 1px solid var(--mk-line); border-radius: var(--mk-radius); padding: 8px; margin: 8px 0;
+                            max-height: 320px; overflow: auto; background: var(--mk-bg); }
+  section.detail .kind-actions, section.detail .file-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
   [hidden] { display: none !important; }
 `;
 
@@ -142,6 +173,10 @@ const extension = {
         this.selected = new Set();
         /** The items cut with Ctrl+X, to move with Ctrl+V: [{ id, name, kind }]. */
         this.cut = [];
+        /** The kinds of files of other extensions, by <extension>/<kind> (EXT-105). */
+        this.kinds = fileKinds(context);
+        /** The file whose detail is shown. */
+        this.detail = null;
         this.render();
         window.addEventListener('popstate', this.onPopState);
         void this.open(folderInAddress(), { push: false });
@@ -203,6 +238,20 @@ const extension = {
                 <p class="muted"></p>
                 <p><a class="back"></a></p>
               </div>
+              <section class="detail" aria-labelledby="detail-title" hidden>
+                <header>
+                  <h2 id="detail-title"></h2>
+                  <button type="button" class="close"></button>
+                </header>
+                <dl></dl>
+                <div class="preview" hidden></div>
+                <div class="kind-actions" role="group" hidden></div>
+                <div class="file-actions">
+                  <button type="button" class="download-file"></button>
+                  <button type="button" class="replace"></button>
+                  <input type="file" class="replace-input" hidden />
+                </div>
+              </section>
               <section class="access" aria-labelledby="access-title" hidden>
                 <h2 id="access-title"></h2>
                 <ul></ul>
@@ -253,6 +302,23 @@ const extension = {
         $('section.access .admins').textContent = t('admins');
         $('section.access button.share').textContent = t('share');
         $('section.access button.share').addEventListener('click', () => this.share());
+        $('section.detail button.close').textContent = t('close');
+        $('section.detail button.close').addEventListener('click', () => this.hideDetail());
+        $('section.detail button.download-file').textContent = t('download');
+        $('section.detail button.download-file').addEventListener('click', () => {
+          if (this.detail) {
+            void this.download([this.detail]);
+          }
+        });
+        $('section.detail button.replace').textContent = t('replace');
+        $('section.detail button.replace').addEventListener('click', () => $('input.replace-input').click());
+        $('input.replace-input').addEventListener('change', (event) => {
+          const [file] = event.target.files ?? [];
+          event.target.value = '';
+          if (file && this.detail) {
+            void this.replace(this.detail, file);
+          }
+        });
         $('.uploads').setAttribute('aria-label', t('uploads'));
         $('.uploads h2').textContent = t('uploads');
         // The sharing dialog of the shell gives the focus back to the Share button when it closes: then
@@ -376,6 +442,12 @@ const extension = {
           }
         }
         this.showFolder(folder);
+        const detail = this.detail && folder.items.find((item) => item.id === this.detail.id);
+        if (detail) {
+          this.showDetail(detail);
+        } else {
+          this.hideDetail();
+        }
         await this.renderTree();
         // An open folder shows who has access to it; the root and Shared with me show it for the item
         // chosen in the list.
@@ -542,7 +614,16 @@ const extension = {
           this.showSelection();
         });
         name.append(box);
-        name.insertAdjacentHTML('beforeend', ICONS[item.kind] ?? ICONS.file);
+        const kind = this.kindOf(item);
+        if (kind?.icon) {
+          const icon = document.createElement('img');
+          icon.className = 'kind';
+          icon.alt = '';
+          icon.src = kind.icon;
+          name.append(icon);
+        } else {
+          name.insertAdjacentHTML('beforeend', ICONS[item.kind] ?? ICONS.file);
+        }
         if (item.kind === 'folder') {
           name.append(this.link(item.id, item.name));
           this.dropTarget(tr, () => item.id);
@@ -555,6 +636,28 @@ const extension = {
           open.title = t('downloadItem', { name: item.name });
           open.addEventListener('click', () => void this.download([item]));
           name.append(open);
+          // EXT-105: the kind and its state, the actions of the kind, and the detail of the file.
+          if (kind) {
+            name.append(badge(kind.title, 'kind'));
+            if (item.fileKind.state) {
+              name.append(badge(this.stateText(kind, item.fileKind.state), 'state'));
+            }
+          }
+          const actions = document.createElement('span');
+          actions.className = 'row-actions';
+          for (const action of kind?.actions ?? []) {
+            actions.append(this.actionButton(item, action));
+          }
+          const details = document.createElement('button');
+          details.type = 'button';
+          details.className = 'details';
+          // An icon, so that the name of the file stays the only text of its cell.
+          details.innerHTML = ICONS.details;
+          details.title = t('detailsOf', { name: item.name });
+          details.setAttribute('aria-label', t('detailsOf', { name: item.name }));
+          details.addEventListener('click', () => this.showDetail(item));
+          actions.append(details);
+          name.append(actions);
         }
         if (editable(item)) {
           tr.draggable = true;
@@ -585,6 +688,184 @@ const extension = {
         tr.classList.toggle('selected', this.selected.has(item.id));
         tr.classList.toggle('cut', this.cut.some((each) => each.id === item.id));
         return tr;
+      }
+
+      /**
+       * The kind of a file as the app shows it (EXT-105): the contribution of its extension, when the
+       * server says the file is of a kind whose extension is active; null for a plain file.
+       */
+      kindOf(item) {
+        if (!item.fileKind) {
+          return null;
+        }
+        const id = `${item.fileKind.extension}/${item.fileKind.name}`;
+        const contribution = this.kinds.get(id);
+        const language = String(context.locale ?? 'en');
+        const text = (key, fallback) => translated(contribution, key, language) ?? fallback;
+        const attributes = contribution?.attributes ?? {};
+        return {
+          id,
+          extension: item.fileKind.extension,
+          title: text('title', typeof attributes.title === 'string' ? attributes.title : item.fileKind.name),
+          icon: typeof attributes.icon === 'string' ? `${ASSETS}/${contribution.extensionId}/${attributes.icon}` : null,
+          preview: typeof attributes.preview === 'string' ? attributes.preview : null,
+          states: attributes.states && typeof attributes.states === 'object' ? attributes.states : {},
+          actions: (Array.isArray(attributes.actions) ? attributes.actions : []).map((action) => ({
+            id: action.id,
+            element: action.element,
+            title: text(`action.${action.id}`, action.title),
+          })),
+          text,
+        };
+      }
+
+      /** The title of a state of a kind, in the language of the person; the state itself otherwise. */
+      stateText(kind, state) {
+        const title = kind.states[state];
+        return kind.text(`state.${state}`, typeof title === 'string' ? title : state);
+      }
+
+      actionButton(item, action) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'kind-action';
+        button.dataset.action = action.id;
+        button.textContent = action.title;
+        button.setAttribute('aria-label', this.t('actionOn', { action: action.title, name: item.name }));
+        button.addEventListener('click', () => void this.runAction(item, action));
+        return button;
+      }
+
+      /** The file as the elements of its kind receive it: what it is, and a signed link to its content. */
+      fileFor(item) {
+        return {
+          id: item.id,
+          name: item.name,
+          contentType: item.contentType,
+          size: item.size,
+          fileKind: item.fileKind,
+          url: () => this.contentUrl(item),
+        };
+      }
+
+      /** A signed, expiring link to the content of a file (EXT-004). */
+      async contentUrl(item) {
+        const response = await context.fetch(DOWNLOADS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: [item.id] }),
+        });
+        let download = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(this.reason(download, response.status));
+        }
+        const until = Date.now() + DOWNLOAD_WAIT;
+        while (download.status === 'pending' && Date.now() < until) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          const again = await context.fetch(`${DOWNLOADS_API}/${encodeURIComponent(download.id)}`);
+          download = await again.json().catch(() => ({ status: 'failed' }));
+        }
+        if (download.status !== 'ready') {
+          throw new Error(this.t('notReady'));
+        }
+        return download.entries[0].url;
+      }
+
+      /** Shows the detail of a file: what it is, its kind and state, its preview and its actions (EXT-105). */
+      showDetail(item) {
+        const t = this.t;
+        const $ = this.$;
+        const same = this.detail?.id === item.id && this.detail?.changed === item.changed;
+        this.detail = item;
+        const kind = this.kindOf(item);
+        const section = $('section.detail');
+        section.hidden = false;
+        $('#detail-title').textContent = item.name;
+        const facts = [
+          [t('type'), item.contentType ?? ''],
+          [t('size'), this.bytes(item.size ?? 0)],
+          [t('fileKind'), kind ? kind.title : t('plainFile')],
+        ];
+        if (kind && item.fileKind.state) {
+          const state = this.stateText(kind, item.fileKind.state);
+          facts.push([t('state'), item.fileKind.stateDetail ? `${state}: ${item.fileKind.stateDetail}` : state]);
+        }
+        $('section.detail dl').replaceChildren(
+          ...facts.flatMap(([term, value]) => {
+            const dt = document.createElement('dt');
+            dt.textContent = term;
+            const dd = document.createElement('dd');
+            dd.textContent = value;
+            return [dt, dd];
+          }),
+        );
+        const preview = $('section.detail .preview');
+        if (kind?.preview && customElements.get(kind.preview)) {
+          // The preview is made again only for another file, or a file that changed.
+          if (!same || preview.hidden) {
+            const element = document.createElement(kind.preview);
+            element.file = this.fileFor(item);
+            preview.replaceChildren(element);
+          }
+          preview.setAttribute('aria-label', t('preview', { name: item.name }));
+          preview.setAttribute('role', 'region');
+          preview.hidden = false;
+        } else {
+          preview.replaceChildren();
+          preview.hidden = true;
+        }
+        const actions = $('section.detail .kind-actions');
+        actions.setAttribute('aria-label', t('actionsOf', { name: item.name }));
+        actions.replaceChildren(...(kind?.actions ?? []).map((action) => this.actionButton(item, action)));
+        actions.hidden = actions.childElementCount === 0;
+        $('section.detail button.replace').hidden = !editable(item);
+      }
+
+      hideDetail() {
+        this.detail = null;
+        this.$('section.detail').hidden = true;
+        this.$('section.detail .preview').replaceChildren();
+      }
+
+      /**
+       * Runs an action of the kind of a file: its element, in a dialog, given the file. When the element
+       * says that it changed the file, the list and the detail show it again, with the new state.
+       */
+      async runAction(item, action) {
+        const t = this.t;
+        const answer = this.dialog(t('actionOn', { action: action.title, name: item.name }), (form) => {
+          const element = customElements.get(action.element) ? document.createElement(action.element) : null;
+          if (element) {
+            element.addEventListener('catalog-file-changed', () => void this.refresh());
+            element.file = this.fileFor(item);
+            form.append(element);
+          }
+          const row = document.createElement('div');
+          row.className = 'actions';
+          const close = document.createElement('button');
+          close.value = 'close';
+          close.textContent = t('close');
+          row.append(close);
+          form.append(row);
+        });
+        await answer;
+        await this.refresh();
+      }
+
+      /** Replaces the content of a file with one chosen on the computer (EXT-105). */
+      async replace(item, file) {
+        const t = this.t;
+        const response = await context.fetch(`${ITEMS_API}/${encodeURIComponent(item.id)}/content`, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          body: file,
+        });
+        if (!response.ok) {
+          this.say(t('notReplaced', { reason: this.reason(await response.json().catch(() => ({})), response.status) }), true);
+          return;
+        }
+        await this.refresh();
+        this.say(t('replaced', { name: item.name }));
       }
 
       /** The items selected in the open folder, in its order. */
@@ -1349,6 +1630,43 @@ async function fetched(url) {
 /** The folder open in the app, or null at the root and in Shared with me. */
 function openFolderId(folder) {
   return folder?.id && folder.id !== SHARED ? folder.id : null;
+}
+
+/**
+ * The contributions of other extensions to the kinds of files (EXT-105), by <extension>/<kind>: the shell
+ * gives only those that match the schema of the point, of the extensions active for the person.
+ */
+function fileKinds(context) {
+  const kinds = new Map();
+  for (const contribution of context.contributionsTo?.(FILE_KINDS) ?? []) {
+    const kind = contribution.attributes?.kind;
+    if (typeof kind === 'string' && !kinds.has(`${contribution.extensionId}/${kind}`)) {
+      kinds.set(`${contribution.extensionId}/${kind}`, contribution);
+    }
+  }
+  return kinds;
+}
+
+/** A text of a contribution in a language, from its i18n block (MK-053): for the language, or its main one. */
+function translated(contribution, key, language) {
+  const i18n = contribution?.attributes?.i18n;
+  if (!i18n || typeof i18n !== 'object') {
+    return undefined;
+  }
+  for (const tag of [language, language.split('-')[0]]) {
+    const text = i18n[tag]?.[key];
+    if (typeof text === 'string' && text.trim() !== '') {
+      return text;
+    }
+  }
+  return undefined;
+}
+
+function badge(text, className) {
+  const span = document.createElement('span');
+  span.className = `badge ${className}`;
+  span.textContent = text;
+  return span;
 }
 
 function cell(text, className) {

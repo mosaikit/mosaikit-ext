@@ -8,6 +8,17 @@ and the versions [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Kinds of files added by other extensions (EXT-105), through the contract
+  `io.github.mosaikit.ext.catalog/file-kind` version 1 (MK-134), whose interfaces are in the new
+  library `io.github.mosaikit.ext:ext-catalog-api` 1.0.0 (`api/`): a kind recognizes files by name,
+  media type or first bytes when they are stored or replaced, and when its extension becomes active;
+  it is told, in a job of the organization, when its files are stored, replaced, renamed, moved,
+  deleted or shared differently, reads their content through the catalog, and records a state on
+  them (`CatalogFiles` for work after the event). The frontend point `catalog.file-kind` version 1
+  takes the icon, title, preview element, states and actions of a kind; the list shows them on the
+  files of the kind, with *Details* for every file (type, size, kind, state, preview, actions,
+  download, replace). Without the extension the files are plain files. `PUT items/{id}/content`
+  replaces the content of a file; files in lists have `contentType` and `fileKind`.
 - Sharing of folders and files (EXT-003) in the sharing dialog of the platform, with people, groups,
   the organization or a link, at the levels read, edit and manage: a share on a folder counts on
   everything it holds, also on what is added later, and a share removed stops counting at the next

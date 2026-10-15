@@ -20,6 +20,9 @@ export interface Item {
   changed: string;
   sharing: { scope: string; inherited: boolean };
   level: string;
+  /** EXT-105: the media type of a file, and its kind while the extension of the kind is active. */
+  contentType: string | null;
+  fileKind: { extension: string; name: string; state: string | null; stateDetail: string | null } | null;
 }
 
 export interface Folder {
@@ -46,6 +49,23 @@ export async function file(person: Person, parent: string, name: string, content
   const { status, body } = await api(person, `${API}/folders/${parent}/files?name=${encodeURIComponent(name)}`, {
     method: 'POST',
     headers: { 'content-type': 'text/plain' },
+    body: content,
+  });
+  expect(status, JSON.stringify(body)).toBe(201);
+  return body as Item;
+}
+
+/** Stores a file in a folder with the content and the media type given (EXT-105). */
+export async function fileOfType(
+  person: Person,
+  parent: string,
+  name: string,
+  content: string,
+  type: string,
+): Promise<Item> {
+  const { status, body } = await api(person, `${API}/folders/${parent}/files?name=${encodeURIComponent(name)}`, {
+    method: 'POST',
+    headers: { 'content-type': type },
     body: content,
   });
   expect(status, JSON.stringify(body)).toBe(201);
