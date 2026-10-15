@@ -11,7 +11,8 @@ extensions or the whole repository; every docs/requirements folder of the reposi
 - every dependency on an EXT requirement exists; dependencies on Mosaikit (MK) are checked against a
   clone of it when there is one (../mosaikit, or MOSAIKIT_REQUIREMENTS);
 - every EXT id cited by a test exists, and every requirement marked done is cited by a test
-  (`@Tag("EXT-012")` in Java, `EXT-012` in the title of a test).
+  (`@Tag("EXT-012")` in Java, `EXT-012` in the title of a test, or in the docstring of a Python
+  test_*.py).
 
     python docs/requirements/check.py
 """
@@ -32,7 +33,7 @@ FRONT_MATTER = re.compile(r"^---\n(.*?)\n---\n(.*)$", re.S)
 # Folders never searched for requirements: dependencies and builds, and those starting with a dot
 # (.git, and the clone of Mosaikit that the CI puts in .mosaikit).
 SKIPPED = ("node_modules", "target")
-TEST_FILES = re.compile(r"(\.spec\.ts|\.test\.ts|\.e2e\.ts|Test\.java|IT\.java)$")
+TEST_FILES = re.compile(r"(\.spec\.ts|\.test\.ts|\.e2e\.ts|Test\.java|IT\.java)$|^test_.*\.py$")
 
 
 def read(path: str) -> tuple[dict, str]:
