@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 Massimo Antonini
+  SPDX-License-Identifier: MPL-2.0
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <!--
+      A project of its own (ADR-0001): its parent is the published parent of Mosaikit extensions, never a
+      POM of this repository (hence the empty relativePath).
+
+        mvn package    lib/ext-catalog-connection-postgres.jar with the API of the connectors next to it,
+                       target/ext-catalog-connection-postgres-0.1.0.zip, and the package of the connection
+                       framework it requires in target/required/, for the tests
+        mvn verify     also the tests of tests/ on the bench of @mosaikit/testing (npm test)
+
+      The connector implements the contract of the connection framework (EXT-010, MK-134), whose
+      interfaces are the library ext-catalog-connection-api. The JDBC driver org.postgresql:postgresql is
+      a library of the kernel: the parent gives it scope provided, so the package leaves it out (MK-131).
+    -->
+    <parent>
+        <groupId>io.github.mosaikit</groupId>
+        <artifactId>mosaikit-extension-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath/>
+    </parent>
+    <groupId>io.github.mosaikit.ext</groupId>
+    <artifactId>ext-catalog-connection-postgres</artifactId>
+    <version>0.1.0</version>
+    <name>PostgreSQL connector</name>
+    <description>Connections to PostgreSQL databases, with their schemas, tables and views, and read-only queries.</description>
+    <url>https://github.com/mosaikit/mosaikit-ext/tree/main/ext-catalog-connection-postgres</url>
+    <scm>
+        <url>https://github.com/mosaikit/mosaikit-ext</url>
+        <connection>scm:git:https://github.com/mosaikit/mosaikit-ext.git</connection>
+        <developerConnection>scm:git:git@github.com:mosaikit/mosaikit-ext.git</developerConnection>
+    </scm>
+    <properties>
+        <!-- The package of the framework that the tests install next to the connector. -->
+        <connection.framework.version>0.1.0</connection.framework.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>io.github.mosaikit.ext</groupId>
+            <artifactId>ext-catalog-connection-api</artifactId>
+            <version>0.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.mosaikit</groupId>
+            <artifactId>mosaikit-kernel-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <!-- The connector requires the connection framework (manifest.yaml): its tests install its
+                     package, io.github.mosaikit.ext:ext-catalog-connection of type zip, as a product does. -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>required-extensions</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>io.github.mosaikit.ext</groupId>
+                                    <artifactId>ext-catalog-connection</artifactId>
+                                    <version>${connection.framework.version}</version>
+                                    <type>zip</type>
+                                </artifactItem>
+                            </artifactItems>
+                            <outputDirectory>${project.build.directory}/required</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
