@@ -11,7 +11,9 @@
       A project of its own (ADR-0001): its parent is the published parent of Mosaikit extensions, never a
       POM of this repository (hence the empty relativePath).
 
-        mvn package    lib/ext-catalog.jar and target/ext-catalog-0.1.0.zip, the package of the extension
+        mvn -f api install    the API of the contracts of the catalog, once and after each change of api/
+        mvn package    lib/ext-catalog.jar and target/ext-catalog-0.1.0.zip, the package of the extension,
+                       and the fixtures of the tests (tests/fixtures/*), each in its target/
         mvn verify     also the tests of tests/ on the bench of @mosaikit/testing (npm test)
 
       The Java code compiles against the API of the kernel and the Quarkus extensions the kernel already
@@ -78,4 +80,43 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <!-- After the package of the catalog, the extensions that its tests install
+                     (tests/fixtures), on the API of the contracts in the local Maven repository;
+                     -Dinvoker.skip leaves them out. -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-invoker-plugin</artifactId>
+                <version>3.9.1</version>
+                <configuration>
+                    <projectsDirectory>${project.basedir}</projectsDirectory>
+                    <localRepositoryPath>${settings.localRepository}</localRepositoryPath>
+                    <streamLogs>true</streamLogs>
+                    <noLog>true</noLog>
+                    <showErrors>true</showErrors>
+                    <properties>
+                        <skip.npm>true</skip.npm>
+                    </properties>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>test-fixtures</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <pomIncludes>
+                                <pomInclude>tests/fixtures/*/pom.xml</pomInclude>
+                            </pomIncludes>
+                            <goals>
+                                <goal>package</goal>
+                            </goals>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

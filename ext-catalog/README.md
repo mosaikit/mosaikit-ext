@@ -349,10 +349,8 @@ not available. [`tests/fixtures/records`](tests/fixtures/records) is a complete 
 Java 25, Maven and Node.js 24, from this folder:
 
 ```bash
-mvn -f api install                       # the API of the contracts of the catalog, first (EXT-105)
-mvn -f tests/fixtures/text-notes package # the fixture of the tests of the kinds of files
-mvn -f tests/fixtures/records package    # the fixture of the tests of the linked documents
-mvn package    # target/ext-catalog-0.1.0.zip, the package to install
+mvn -f api install   # the API of the contracts of the catalog, first (EXT-105)
+mvn package    # target/ext-catalog-0.1.0.zip, the package to install, and the fixtures of the tests
 mvn verify     # also the tests of tests/, on a Mosaikit installation started for them
 npm test       # the same tests, after mvn package
 npm run dev    # Mosaikit with this extension, until Ctrl+C
@@ -374,7 +372,10 @@ mvn -q install:install-file -Dfile=mosaikit-extension-parent-$v.pom -DpomFile=mo
 mvn -q install:install-file -Dfile=mosaikit-kernel-api-$v.jar -DpomFile=mosaikit-kernel-api-$v.pom
 ```
 
-The CI does the same with the action `mosaikit/.github/actions/kernel-api`.
+The CI does the same with the action `mosaikit/.github/actions/kernel-api`. Maven resolves the
+dependencies of a project before any plugin of its build runs, so the API of the contracts is
+installed apart, before the catalog is built; the fixtures of `tests/fixtures/` are built by
+`mvn package` after the catalog (maven-invoker), and `-Dinvoker.skip` leaves them out.
 `MOSAIKIT_INSTALLATION=<mosaikit>/target/dist/mosaikit` tests against a build of Mosaikit.
 The kinds of files (EXT-105) need the contracts between extensions of Mosaikit (MK-134): until they
 are in its snapshot, build Mosaikit from the branch that brings them and test with
