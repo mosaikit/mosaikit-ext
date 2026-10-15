@@ -32,6 +32,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -118,7 +119,7 @@ public class CatalogResource {
         this.identity = identity;
     }
 
-    /** The root of the person: the folders and files at the root they read, and those shared with them. */
+    /** The root of the person: the folders and files at the root of the organization that they read. */
     @GET
     @Path("folders")
     @Transactional
@@ -126,6 +127,24 @@ public class CatalogResource {
         Comparator<Item> comparator = order(sort, order);
         Tree tree = new Tree(items, sharing);
         return new FolderView(null, null, List.of(), null, member(), views(tree, tree.roots(), comparator));
+    }
+
+    /**
+     * Shared with me (EXT-003): the folders and files that someone else shared with the person, a group
+     * of theirs or the organization, and that are not inside a folder they read already. A shared folder
+     * opens with everything it holds; the rest of the folder of a shared file stays hidden.
+     */
+    @GET
+    @Path("shared")
+    @Transactional
+    public FolderView shared(@QueryParam("sort") String sort, @QueryParam("order") String order) {
+        Comparator<Item> comparator = order(sort, order);
+        Tree tree = new Tree(items, sharing);
+        Viewer viewer = viewer();
+        List<Item> shared = tree.sharedWithPerson(
+                viewer::reaches,
+                item -> viewer.owns(resources.find(Tree.ref(item)).map(Resource::owner).orElse(null)));
+        return new FolderView(null, null, List.of(), null, false, views(tree, shared, comparator));
     }
 
     /** A folder the person reads, with its content; 404 when it does not exist or they cannot read it. */
@@ -255,6 +274,17 @@ public class CatalogResource {
         return owners.computeIfAbsent(account, _ -> Optional.of(new Owner(
                         account, people.find(account).map(People.Person::displayName).orElse(null))))
                 .orElse(null);
+    }
+
+    /** The person of the request, with their teams, to tell which grants are for them. */
+    private Viewer viewer() {
+        UUID account = people.findByUsername(identity.getPrincipal().getName())
+                .map(People.Person::account)
+                .orElse(null);
+        Set<UUID> teams = account == null
+                ? Set.of()
+                : people.teamsOf(account).stream().map(People.OrganizationTeam::id).collect(Collectors.toSet());
+        return new Viewer(account, teams, member());
     }
 
     /** Whether the person is a member or an administrator of the organization, not a guest. */
