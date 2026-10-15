@@ -116,6 +116,11 @@ export const MESSAGES = {
     preview: 'Preview of the source',
     previewFailed: 'The source answered: {message}',
     previewMore: 'The source holds more.',
+    shape: 'Shape: {shape}',
+    sample: 'Sample',
+    inspectUnreachable: 'Not inspected, the source does not answer: {detail}',
+    inspectNeedsDeclaration: 'Not inspected, the source does not describe it: {detail}',
+    inspectNotReadable: 'Not inspected: {detail}',
     resizeFilters: 'Resize the filters',
     pickTitle: 'Choose a source',
     pickTitleMany: 'Choose sources',
@@ -249,6 +254,11 @@ export const MESSAGES = {
     preview: 'Anteprima della fonte',
     previewFailed: 'La fonte ha risposto: {message}',
     previewMore: 'La fonte contiene altro.',
+    shape: 'Forma: {shape}',
+    sample: 'Campione',
+    inspectUnreachable: 'Non esaminata, la fonte non risponde: {detail}',
+    inspectNeedsDeclaration: 'Non esaminata, la fonte non la descrive: {detail}',
+    inspectNotReadable: 'Non esaminata: {detail}',
     resizeFilters: 'Ridimensiona i filtri',
     pickTitle: 'Scegli una fonte',
     pickTitleMany: 'Scegli le fonti',
@@ -281,6 +291,17 @@ export const MESSAGES = {
     },
   },
 };
+
+/** The names of the shapes of what a piece holds (EXT-018), by language. */
+const SHAPES = {
+  en: { 'json-records': 'JSON records', 'json-object': 'JSON object', geojson: 'GeoJSON', csv: 'CSV', xml: 'XML', text: 'Text' },
+  it: { 'json-records': 'Record JSON', 'json-object': 'Oggetto JSON', geojson: 'GeoJSON', csv: 'CSV', xml: 'XML', text: 'Testo' },
+};
+
+/** The name of a shape in the language of the locale, or the shape itself. */
+export function shapeName(locale, shape) {
+  return SHAPES[languageOf(locale)]?.[shape] ?? SHAPES.en[shape] ?? shape;
+}
 
 /** The language of MESSAGES for a locale: itself (it), its main language (it for it-CH), or English. */
 export function languageOf(locale) {

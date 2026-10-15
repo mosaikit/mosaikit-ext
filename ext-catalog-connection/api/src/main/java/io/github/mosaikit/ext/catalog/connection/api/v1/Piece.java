@@ -59,6 +59,12 @@ public record Piece(String id, String name, String kind, boolean container, Map<
         /** The format of the messages of a topic or of the responses of an endpoint, such as {@code json}. */
         public static final String FORMAT = "format";
 
+        /**
+         * The shape of what a piece holds, classified by the framework from a sample (EXT-018): {@code
+         * json-records}, {@code json-object}, {@code geojson}, {@code csv}, {@code xml} or {@code text}.
+         */
+        public static final String SHAPE = "shape";
+
         private Facts() {}
     }
 }

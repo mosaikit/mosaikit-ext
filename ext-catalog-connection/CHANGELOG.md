@@ -37,6 +37,11 @@ and the versions [Semantic Versioning](https://semver.org/).
   selection box counted in the header, the pieces at the top level of the source and its state as last
   tested or listed (migration V3, fields `updated`, `pieces`, `morePieces`, `state` and `checked` of a
   connection), the last update, and a header with the order (most recent first, or by name).
+- A connection declares what it contains by inspecting it (EXT-018): `Connector.inspect` and
+  `Inspection` in version 1 of the contract, a default method; the framework classifies the shape of the
+  sample and derives its facts; the test of a new connection and the detail show the shape and a sample
+  of the pieces that hold data, or why they cannot be looked at, and offer the uses the facts found
+  allow. `GET /api/v1/ext/connections/connections/{id}/inspection`.
 - A connection is edited from its detail panel (EXT-017): the second and third steps of its creation,
   filled in, the type fixed; the change keeps the settings the form does not show (marked `readOnly` in
   the form of the connector) and shows the new values on the card and in the detail at once.

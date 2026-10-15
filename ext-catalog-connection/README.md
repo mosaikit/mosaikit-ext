@@ -69,7 +69,7 @@ those they edit: name, description, settings, credential and thumbnail; the type
 | `PUT /api/v1/ext/connections/connections/{id}/thumbnail` | `edit` | uploads the thumbnail, the image as the body with its `Content-Type` |
 | `DELETE /api/v1/ext/connections/connections/{id}/thumbnail` | `edit` | back to the generated thumbnail |
 | `POST /api/v1/ext/connections/connections/preview` | | tests settings before creating: `{success, message, address, contents}`, the first pieces of the source when it answers |
-| `POST /api/v1/ext/connections/connections/{id}/test`, `GET .../{id}/contents` | `use` | test, contents |
+| `POST /api/v1/ext/connections/connections/{id}/test`, `GET .../{id}/contents`, `GET .../{id}/inspection?piece=` | `use` | test, contents, what looking at a piece found |
 | `POST /api/v1/ext/connections/references/resolve` | `use` | the references of the source picker as they are now, at most 100: `{references: [{connection, part}]}` answers, in order, `{status, connection, part, detail}` |
 
 The list page has the shape of the list page of the UI kit of Mosaikit (MK-105) and takes the same
@@ -244,6 +244,19 @@ contracts:
           it: { title: Mappa, description: Le righe di una tabella su una mappa. }
   ```
 
+- **Inspection** (EXT-018): what a piece holds is not guessed from its type. A connector looks at a
+  piece with `inspect(settings, piece)`, a default method of the contract, and returns an `Inspection`:
+  the media type and a sample of what it holds (the response of an endpoint, the first messages of a
+  topic, the first rows of a table) and the facts it finds in it, such as a text column whose values
+  are coordinates (`geometry`). The framework classifies the shape of the sample, whatever the protocol
+  (`json-records`, `json-object`, `geojson`, `csv`, `xml`, `text`, the fact `shape`), and derives the
+  facts the shape tells (`columns` of JSON records and CSV, `geometry` of GeoJSON); the facts of the
+  connector come first, and those of the listing stay. The test of a new connection looks at the first
+  pieces that hold data, and the detail at the pieces it lists: each shows its shape and sample, and
+  offers the uses its facts allow. A piece that cannot be looked at says why (`unreachable`,
+  `needs-declaration`, `not-readable`, the default of a connector that does not inspect).
+  `GET /api/v1/ext/connections/connections/{id}/inspection?piece=<id>` answers `{piece, state, detail,
+  mediaType, shape, samples, facts}`.
 - **Queries** (EXT-040): a connector of a source that takes queries, such as a SQL database, implements
   `query(settings, statement, limit)`, which returns `Rows` (columns, at most `limit` rows, and whether
   the source had more) and only reads; `POST /api/v1/ext/connections/connections/{id}/query` with
