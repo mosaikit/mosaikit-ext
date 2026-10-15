@@ -172,6 +172,7 @@ test.describe('EXT-011 all connections of an organization in one list, filtered 
 
     // Edit, choose an image, save.
     await card(page, connection.name).getByRole('button', { name: `Edit ${connection.name}` }).click();
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
     await page.getByLabel('Thumbnail').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: PNG });
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByRole('status')).toHaveText(`Connection ${connection.name} saved.`);
@@ -193,6 +194,7 @@ test.describe('EXT-011 all connections of an organization in one list, filtered 
 
     // Removed, the generated thumbnail is back.
     await card(page, connection.name).getByRole('button', { name: `Edit ${connection.name}` }).click();
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
     await page.getByLabel('Remove the thumbnail').check();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(card(page, connection.name).locator('.thumb')).toHaveAttribute('data-thumbnail', 'generated');
@@ -217,8 +219,9 @@ test.describe('EXT-015 every connection has an owner and a description', () => {
     await openConnections(page);
     await page.getByRole('button', { name: 'New connection' }).click();
     await page.getByRole('button', { name: /Sample files/ }).click();
-    await page.getByLabel('Name', { exact: true }).fill(name);
     await page.getByLabel('Address (required)').fill('https://files.example.org/app');
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await page.getByLabel('Name', { exact: true }).fill(name);
     await page.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(page.getByRole('status')).toHaveText(`Connection ${name} created.`);
     for (const each of [sample.name, files.name, name]) {
@@ -242,7 +245,7 @@ test.describe('EXT-015 every connection has an owner and a description', () => {
 
   test('EXT-015 the creation and edit forms have a description right under the name, and saving it empty clears it', async ({ page }) => {
     await openConnections(page);
-    const labels = () => page.locator('form.connect > label > span:first-child').allTextContents();
+    const labels = () => page.locator('form.connect fieldset.naming > label > span:first-child').allTextContents();
 
     // Every connector: the form of each type has the description right under the name.
     for (const type of [/Sample source/, /Sample files/]) {
@@ -255,9 +258,10 @@ test.describe('EXT-015 every connection has an owner and a description', () => {
     const name = unique('Described');
     await page.getByRole('button', { name: 'New connection' }).click();
     await page.getByRole('button', { name: /Sample source/ }).click();
+    await page.getByLabel('Host (required)').fill('shop.example.org');
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
     await page.getByLabel('Name', { exact: true }).fill(name);
     await page.getByLabel('Description').fill('Orders and customers of the shop');
-    await page.getByLabel('Host (required)').fill('shop.example.org');
     await page.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(page.getByRole('status')).toHaveText(`Connection ${name} created.`);
     await expect(card(page, name).locator('.subtitle')).toHaveText('Orders and customers of the shop');
@@ -268,6 +272,7 @@ test.describe('EXT-015 every connection has an owner and a description', () => {
     expect((await labels()).slice(0, 2)).toEqual(['Name', 'Description']);
     await expect(page.getByLabel('Description')).toHaveValue('Orders and customers of the shop');
     await expect(page.getByLabel('Host (required)')).toHaveValue('shop.example.org');
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
     await page.getByLabel('Description').fill('The shop, all of it');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByRole('status')).toHaveText(`Connection ${name} saved.`);
@@ -275,6 +280,7 @@ test.describe('EXT-015 every connection has an owner and a description', () => {
 
     // Saved empty, the description is cleared.
     await card(page, name).getByRole('button', { name: `Edit ${name}` }).click();
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
     await page.getByLabel('Description').fill('');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByRole('status')).toHaveText(`Connection ${name} saved.`);
