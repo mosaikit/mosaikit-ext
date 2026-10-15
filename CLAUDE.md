@@ -13,7 +13,10 @@ is and gives the naming rule (`ext-<extension>[-<sub>]`, manifest id
 
 ```
 docs/requirements/  EXT-nnn.md that span several extensions (format of Mosaikit), and check.py that checks them all
-ext-*/              one folder per extension: README and docs/requirements/ now, its code when it arrives
+ext-*/              one folder per extension, a project of its own: manifest, pom.xml, package.json,
+                    web/, tests/, CHANGELOG.md, README and docs/requirements/ (README and requirements
+                    only, until its code arrives)
+tools/              check_self_contained.py (EXT-102) and its tests
 ```
 
 ## Rules
