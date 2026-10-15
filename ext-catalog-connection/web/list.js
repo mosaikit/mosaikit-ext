@@ -42,6 +42,7 @@ export const LIST_STYLE = `
  * @param {(item: object) => HTMLElement} options.card the card of an item in the grid
  * @param {{ title: string, cell: (item: object) => Node | string }[]} options.columns the columns of the rows
  * @param {object} options.labels the texts: count(n), view, grid, rows, filters, noMatch, empty, none
+ * @param {() => void} [options.rendered] called after each drawing of the items, such as to mark the selected one
  */
 export class ListPage {
   constructor(container, options) {
@@ -125,9 +126,10 @@ export class ListPage {
       message.className = 'muted empty';
       message.textContent = this.items.length === 0 ? labels.empty : labels.noMatch;
       this.shown.replaceChildren(message);
-      return;
+    } else {
+      this.shown.replaceChildren(this.view === 'grid' ? this.grid(items) : this.rows(items));
     }
-    this.shown.replaceChildren(this.view === 'grid' ? this.grid(items) : this.rows(items));
+    this.options.rendered?.();
   }
 
   /**

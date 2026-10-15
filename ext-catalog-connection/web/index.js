@@ -117,6 +117,30 @@ const STYLE = `
   [role='status'] { min-height: 1.2em; margin: 8px 0; color: var(--mk-muted); }
   [role='status'].error { color: var(--mk-danger); }
   [hidden] { display: none !important; }
+  article.card.opens { cursor: pointer; }
+  article.card.opens:hover { border-color: var(--mk-accent); }
+  article.card.selected, tr.selected { outline: 2px solid var(--mk-accent); outline-offset: -2px;
+                                       background: var(--mk-accent-soft, var(--mk-surface)); }
+  aside.detail { position: fixed; top: 0; bottom: 0; right: 0; z-index: 20; box-sizing: border-box;
+                 width: min(440px, calc(100vw - 32px)); display: flex; flex-direction: column;
+                 background: var(--mk-bg); border-left: 1px solid var(--mk-line); box-shadow: -8px 0 24px rgb(0 0 0 / .18); }
+  .detail-head { flex: none; display: flex; gap: 10px; align-items: center; padding: 12px 16px;
+                 border-bottom: 1px solid var(--mk-line); }
+  .detail-head .thumb { width: 56px; height: 36px; flex: none; border-radius: 4px; }
+  .detail-head h2 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+  .detail-head button.close { flex: none; font-size: 18px; line-height: 1; padding: 4px 10px; }
+  dl.facts { flex: none; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px;
+             margin: 0; padding: 12px 16px; font-size: 13px; }
+  dl.facts dt { color: var(--mk-muted); }
+  dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+  .tags { flex: none; padding: 0 16px 8px; }
+  aside.detail section.contents { flex: 1; min-height: 0; display: flex; flex-direction: column;
+                                  padding: 8px 16px 0; border-top: 1px solid var(--mk-line); }
+  aside.detail h3 { flex: none; font-size: 15px; margin: 4px 0 8px; }
+  aside.detail nav.path { flex: none; }
+  .parts { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+  .parts button.more { margin-top: 8px; }
+  footer.detail-actions { flex: none; padding: 12px 16px; border-top: 1px solid var(--mk-line); background: var(--mk-surface); }
 ${LIST_STYLE}`;
 
 /** @type {import('@mosaikit/sdk').MosaikitExtension} */
@@ -169,13 +193,25 @@ const extension = {
             <ul></ul>
           </section>
           <div class="list"></div>
-          <section class="panel contents" aria-labelledby="contents-title" hidden>
-            <h2 id="contents-title"></h2>
-            <nav class="path"><ol></ol></nav>
-            <ul class="entries"></ul>
-            <p class="state" role="note" hidden></p>
-            <div class="actions"><button type="button" class="more"></button><button type="button" class="close"></button></div>
-          </section>
+          <aside class="detail" id="detail" hidden>
+            <header class="detail-head">
+              <span class="detail-thumb"></span>
+              <h2 id="detail-title" tabindex="-1"></h2>
+              <button type="button" class="close"></button>
+            </header>
+            <dl class="facts"></dl>
+            <div class="tags" data-slot="tags" hidden></div>
+            <section class="contents" aria-labelledby="contents-title">
+              <h3 id="contents-title"></h3>
+              <nav class="path"><ol></ol></nav>
+              <div class="parts">
+                <ul class="entries"></ul>
+                <p class="state" role="note" hidden></p>
+                <button type="button" class="more"></button>
+              </div>
+            </section>
+            <footer class="detail-actions actions" role="group"></footer>
+          </aside>
           <p class="version"></p>`;
         const t = this.t;
         this.root = root;
@@ -192,6 +228,7 @@ const extension = {
           key: (connection) => connection.id,
           facets: [{ id: 'type', title: t('facetType'), values: (connection) => [{ value: connection.type, label: this.typeTitle(connection) }] }],
           card: (connection) => this.card(connection),
+          rendered: () => this.refreshSelection(),
           columns: [
             { title: t('columnName'), className: 'name', cell: (connection) => this.nameCell(connection) },
             { title: t('columnDescription'), cell: (connection) => subtitle(connection) },
@@ -212,13 +249,38 @@ const extension = {
           },
         });
         root.querySelector('button.more').textContent = t('more');
-        root.querySelector('button.close').textContent = t('close');
+        const close = root.querySelector('aside.detail button.close');
+        close.textContent = '×';
+        close.setAttribute('aria-label', t('closeDetail'));
+        close.addEventListener('click', () => this.closeDetail(true));
         root.querySelector('button.new').addEventListener('click', () => this.openCreate());
-        root.querySelector('button.close').addEventListener('click', () => {
-          root.querySelector('section.contents').hidden = true;
-        });
         root.querySelector('button.more').addEventListener('click', () => this.listMore());
+        // The detail closes with a click outside it, other than on a card, and with Escape (EXT-016).
+        this.outside = (event) => {
+          const path = event.composedPath();
+          const detail = root.querySelector('aside.detail');
+          if (!this.selected || path.includes(detail) || path.some((node) => node?.dataset?.opens === 'detail')) {
+            return;
+          }
+          this.closeDetail(false);
+        };
+        this.escape = (event) => {
+          if (event.key === 'Escape' && this.selected) {
+            this.closeDetail(true);
+          }
+        };
+        this.placeDetail = () => this.place();
+        document.addEventListener('click', this.outside);
+        document.addEventListener('keydown', this.escape);
+        window.addEventListener('resize', this.placeDetail);
+        this.selected = null;
         this.loading = this.load();
+      }
+
+      disconnectedCallback() {
+        document.removeEventListener('click', this.outside);
+        document.removeEventListener('keydown', this.escape);
+        window.removeEventListener('resize', this.placeDetail);
       }
 
       status(text, error = false) {
@@ -264,6 +326,16 @@ const extension = {
       renderConnections(connections) {
         this.connections = connections;
         this.list.setItems(connections);
+        // The detail open stays open with what was read again, or closes when the connection is gone.
+        if (this.selected) {
+          const current = connections.find((connection) => connection.id === this.selected);
+          if (current && this.connectorOf(current)) {
+            this.renderFacts(current);
+            this.renderDetailActions(current);
+          } else {
+            this.closeDetail(false);
+          }
+        }
       }
 
       /** The connector of a connection when it is active. */
@@ -293,9 +365,18 @@ const extension = {
         body.className = 'body';
         const connector = this.connectorOf(connection);
         if (connector) {
+          // The whole card opens the detail (EXT-016); its name is the button that keyboards reach.
           const title = document.createElement('h3');
-          title.append(button(connection.name, () => this.openContents(connection, []), 'link'));
+          title.append(this.opener(connection));
           body.append(title, subtitle(connection));
+          card.dataset.opens = 'detail';
+          card.classList.add('opens');
+          card.addEventListener('click', (event) => {
+            if (!event.composedPath().some((node) => node instanceof HTMLElement && node.classList.contains('actions'))) {
+              this.toggleDetail(connection);
+            }
+          });
+          this.markSelected(card, connection);
         } else {
           // A connection whose connector is absent is kept as it is: the placeholder of the
           // platform says what is missing (MK-135), and the app which connector brings it back.
@@ -308,13 +389,169 @@ const extension = {
         return card;
       }
 
+      /** The name of a connection as the button that opens and closes its detail (EXT-016). */
+      opener(connection) {
+        const opener = button(connection.name, null, 'link');
+        opener.setAttribute('aria-controls', 'detail');
+        opener.setAttribute('aria-expanded', String(this.selected === connection.id));
+        return opener;
+      }
+
+      /** Marks the card or row of the connection whose detail is open, for the eye and for assistive technologies. */
+      markSelected(element, connection) {
+        const selected = this.selected === connection.id;
+        element.classList.toggle('selected', selected);
+        if (selected) {
+          element.setAttribute('aria-current', 'true');
+        } else {
+          element.removeAttribute('aria-current');
+        }
+      }
+
+      /** The marks of the selection on the cards and rows drawn, after the list or the selection changes. */
+      refreshSelection() {
+        const list = this.root.querySelector('.list');
+        for (const element of list.querySelectorAll('article.card[data-id], tr[data-id]')) {
+          this.markSelected(element, { id: element.dataset.id });
+          element.querySelector('button[aria-controls="detail"]')?.setAttribute('aria-expanded', String(this.selected === element.dataset.id));
+        }
+      }
+
+      /** Clicking a card opens its detail, clicking it again closes it, another card shows its own. */
+      toggleDetail(connection) {
+        if (this.selected === connection.id) {
+          this.closeDetail(false);
+        } else {
+          this.openDetail(connection);
+        }
+      }
+
+      /**
+       * The detail of a connection, a panel over the list on its right edge, so that the cards do not
+       * move (EXT-016): a header with the name, the facts and the tags that stay in place, the pieces
+       * of the connection that scroll, and the actions fixed at the bottom.
+       */
+      openDetail(connection) {
+        const detail = this.root.querySelector('aside.detail');
+        this.selected = connection.id;
+        detail.dataset.id = connection.id;
+        detail.setAttribute('aria-label', this.t('detail', connection));
+        detail.querySelector('.detail-thumb').replaceChildren(this.thumbnail(connection));
+        detail.querySelector('#detail-title').textContent = connection.name;
+        this.renderFacts(connection);
+        this.renderDetailActions(connection);
+        detail.hidden = false;
+        this.place();
+        this.refreshSelection();
+        this.openContents(connection, []);
+      }
+
+      /** Closes the detail; with `focus`, the keyboard goes back to the card it came from. */
+      closeDetail(focus) {
+        const id = this.selected;
+        if (!id) {
+          return;
+        }
+        this.selected = null;
+        this.browsing = null;
+        this.root.querySelector('aside.detail').hidden = true;
+        this.refreshSelection();
+        if (focus) {
+          this.root.querySelector(`.list [data-id="${CSS.escape(id)}"] button[aria-controls="detail"]`)?.focus();
+        }
+      }
+
+      /**
+       * Places the detail on the right edge of the area where the shell shows the app, over it and as
+       * high as it: the nearest ancestor that scrolls, through the shadow roots, or the window.
+       */
+      place() {
+        const detail = this.root.querySelector('aside.detail');
+        if (detail.hidden) {
+          return;
+        }
+        let node = this;
+        let area = null;
+        while (node && !area) {
+          node = node.parentElement ?? node.getRootNode?.()?.host ?? null;
+          if (node instanceof Element && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) {
+            area = node;
+          }
+        }
+        const box = area?.getBoundingClientRect();
+        detail.style.top = `${Math.max(0, box?.top ?? 0)}px`;
+        detail.style.bottom = `${Math.max(0, box ? window.innerHeight - box.bottom : 0)}px`;
+        detail.style.right = `${Math.max(0, box ? window.innerWidth - box.right : 0)}px`;
+      }
+
+      /** The facts of a connection in its detail: type, category, description, address, owner, and the slot of its tags. */
+      renderFacts(connection) {
+        const t = this.t;
+        const facts = this.root.querySelector('aside.detail dl.facts');
+        const rows = [
+          ['type', t('factType'), this.kind(connection)],
+          ['category', t('factCategory'), this.categoryOf(connection)],
+          ['description', t('factDescription'), connection.description],
+          ['address', t('factAddress'), connection.address],
+          ['owner', t('factOwner'), connection.owner ? connection.owner.name ?? t('formerMember') : t('ownerOrganization')],
+        ];
+        facts.replaceChildren(
+          ...rows
+            .filter(([, , value]) => value)
+            .flatMap(([fact, term, value]) => {
+              const name = document.createElement('dt');
+              name.textContent = term;
+              const text = document.createElement('dd');
+              text.dataset.fact = fact;
+              text.append(value);
+              return [name, text];
+            }),
+        );
+        // The tags of the connection come with the tags of the platform (EXT-012 on MK-097): until then
+        // their place in the detail stays empty and hidden.
+        const tags = this.root.querySelector('aside.detail .tags');
+        tags.setAttribute('aria-label', t('factTags'));
+      }
+
+      /** The actions on a connection, fixed at the bottom of its detail. */
+      renderDetailActions(connection) {
+        const t = this.t;
+        const footer = this.root.querySelector('aside.detail footer.detail-actions');
+        footer.setAttribute('aria-label', t('detailActions', connection));
+        const actions = [button(t('test'), () => this.testSaved(connection))];
+        if (connection.editable) {
+          actions.unshift(
+            button(t('edit'), () => {
+              this.closeDetail(false);
+              this.openEdit(connection);
+            }, 'primary'),
+          );
+        }
+        footer.replaceChildren(...actions);
+      }
+
+      /** Tests a saved connection with its settings and credential. */
+      async testSaved(connection) {
+        const t = this.t;
+        this.status(t('testing'));
+        try {
+          const result = await call(`/connections/${encodeURIComponent(connection.id)}/test`, { method: 'POST' });
+          this.status(t(result.success ? 'tested' : 'testFailed', result), !result.success);
+        } catch (error) {
+          this.status(t('testFailed', { message: error.message }), true);
+        }
+      }
+
       /** The name of a connection in its row, with its thumbnail. */
       nameCell(connection) {
         const cell = document.createElement('div');
         cell.className = 'kind';
         cell.append(this.thumbnail(connection));
         if (this.connectorOf(connection)) {
-          cell.append(button(connection.name, () => this.openContents(connection, []), 'link'));
+          const opener = this.opener(connection);
+          opener.dataset.opens = 'detail';
+          opener.addEventListener('click', () => this.toggleDetail(connection));
+          cell.append(opener);
         } else {
           cell.append(placeholder(connection, this.t, context.locale));
         }
@@ -674,19 +911,27 @@ const extension = {
         state.hidden = true;
         state.removeAttribute('data-state');
         section.querySelector('button.more').hidden = true;
-        section.hidden = false;
+        section.querySelector('.parts').scrollTop = 0;
         await this.listMore();
       }
 
       async listMore() {
         const t = this.t;
-        const { connection, trail, offset } = this.browsing;
+        const browsing = this.browsing;
+        if (!browsing) {
+          return;
+        }
+        const { connection, trail, offset } = browsing;
         const parent = trail.at(-1)?.id ?? '';
         const section = this.root.querySelector('section.contents');
         try {
           const page = await call(
             `/connections/${encodeURIComponent(connection.id)}/contents?parent=${encodeURIComponent(parent)}&offset=${offset}&limit=${PAGE}`,
           );
+          if (this.browsing !== browsing) {
+            // Another connection or container was opened meanwhile.
+            return;
+          }
           const state = section.querySelector('.state');
           if (page.state !== 'listed') {
             // Never an empty list: why there is nothing, in the words of each case.
@@ -699,7 +944,7 @@ const extension = {
           for (const piece of page.items) {
             list.append(this.pieceItem(connection, trail, piece, uses));
           }
-          this.browsing.offset = offset + page.items.length;
+          browsing.offset = offset + page.items.length;
           section.querySelector('button.more').hidden = !page.more;
         } catch (error) {
           this.status(t('failed', { message: error.message }), true);
