@@ -35,7 +35,17 @@ connections, and filters instead of navigating: several types add up. Each card 
   hue and silhouette come from a hash of the name, so that connections of one type do not look alike;
 - its **name**, and under it its **description**, or the **address of its source** when it has none
   (EXT-015);
-- its **type**, with the logo of its connector, and its **owner**.
+- its **type**, with the logo of its connector, and its **owner**;
+- a **selection box**, which the header counts (EXT-014);
+- the **size** of its source, the pieces at its top level as last listed, its **last update** and its
+  **status**: unavailable when its connector is absent, otherwise reachable or unreachable at the last
+  test or listing of its source, or not checked yet. Nothing is read from the source to show them:
+  testing a connection or opening its detail records them;
+- a footer with its owner and the commands the person may give.
+
+The header gives the number of cards shown, which follows the filters, the order (most recent first,
+the default, or by name) and the switch between the grid and the rows. The page opens on this one
+list: every connection, in the grid, with no filter.
 
 Each connection is a resource of the platform (MK-054), of type `connection` with the levels `view`,
 `use`, `edit` and `manage`: the person who creates it owns it, and it is shared with the dialog of the
@@ -44,7 +54,7 @@ those they edit: name, description, settings, credential and thumbnail; the type
 
 | Request | Level | Answer |
 |---|---|---|
-| `GET /api/v1/ext/connections/connections` | `view` | the connections, with `description`, `address`, `owner`, `thumbnail` and `editable` |
+| `GET /api/v1/ext/connections/connections` | `view` | the connections, with `description`, `address`, `owner`, `thumbnail`, `editable`, `updated`, `pieces`, `morePieces`, `state` and `checked` |
 | `GET /api/v1/ext/connections/connections/{id}` | `view` | one connection |
 | `POST /api/v1/ext/connections/connections` | | creates one, owned by the person: `name`, `type`, `description`, `settings`, `credential` |
 | `PUT /api/v1/ext/connections/connections/{id}` | `edit` | changes `name`, `description` (empty clears it), `settings` and `credential` |

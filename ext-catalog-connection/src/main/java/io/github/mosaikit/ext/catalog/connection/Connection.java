@@ -66,6 +66,22 @@ public class Connection {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    /** The pieces at the top level of the source, as last listed; {@code null} until it is listed. */
+    private Integer pieces;
+
+    @Column(name = "more_pieces", nullable = false)
+    private boolean morePieces;
+
+    /** {@code reachable} or {@code unreachable} at the last test or listing; {@code null} before. */
+    @Column(name = "source_state", length = 32)
+    private String sourceState;
+
+    @Column(name = "checked_at")
+    private Instant checkedAt;
+
     /** Required by JPA. */
     protected Connection() {}
 
@@ -86,6 +102,49 @@ public class Connection {
         this.credential = credential;
         // The database keeps microseconds: the connection answers the same before and after it is read.
         this.createdAt = Objects.requireNonNull(now, "now").truncatedTo(ChronoUnit.MICROS);
+        this.updatedAt = this.createdAt;
+    }
+
+    /** When the connection was last changed: created, renamed, described, configured or given a thumbnail. */
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    /** Records a change of the connection at this time. */
+    public void touch(Instant now) {
+        this.updatedAt = Objects.requireNonNull(now, "now").truncatedTo(ChronoUnit.MICROS);
+    }
+
+    /** The pieces at the top level of the source as last listed, {@code null} until it is listed. */
+    public Integer getPieces() {
+        return pieces;
+    }
+
+    /** Whether the source held more pieces than those counted. */
+    public boolean hasMorePieces() {
+        return morePieces;
+    }
+
+    /** {@code reachable} or {@code unreachable} at the last test or listing, {@code null} before. */
+    public String getSourceState() {
+        return sourceState;
+    }
+
+    /** When the source was last tested or listed, {@code null} before. */
+    public Instant getCheckedAt() {
+        return checkedAt;
+    }
+
+    /** Records the state of the source seen by a test or a listing, at this time. */
+    public void checked(boolean reachable, Instant now) {
+        this.sourceState = reachable ? "reachable" : "unreachable";
+        this.checkedAt = Objects.requireNonNull(now, "now").truncatedTo(ChronoUnit.MICROS);
+    }
+
+    /** Records the pieces counted at the top level of the source, and whether it held more. */
+    public void counted(int pieces, boolean more) {
+        this.pieces = pieces;
+        this.morePieces = more;
     }
 
     public UUID getId() {
