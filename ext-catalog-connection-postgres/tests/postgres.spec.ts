@@ -99,8 +99,8 @@ test.describe('EXT-040 PostgreSQL connect through ext-catalog-connection-postgre
     expect(await logo.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
     await type.click();
 
-    // The form of the connector: host, port, database, user and SSL mode; the password is the credential.
-    await page.getByLabel('Name', { exact: true }).fill(name);
+    // How to connect (EXT-013): the form of the connector, host, port, database, user and SSL mode; the
+    // password is the credential.
     await expect(page.getByLabel('Port')).toHaveValue('5432');
     await expect(page.getByLabel('SSL mode')).toHaveValue('prefer');
     await page.getByLabel('Host (required)').fill(source().host);
@@ -110,6 +110,15 @@ test.describe('EXT-040 PostgreSQL connect through ext-catalog-connection-postgre
     await page.getByRole('textbox', { name: /^Credential/ }).fill(secret);
     await page.getByRole('button', { name: 'Test connection' }).click();
     await expect(page.getByRole('status')).toHaveText(new RegExp(`^Connection succeeded: ${PREVIEW.source.slice(1)}`));
+    await expect(page.getByRole('region', { name: 'Preview of the source' }).locator('ul.entries > li .name')).toHaveText([
+      'places',
+      'public',
+      'sales',
+      'staging',
+    ]);
+    // How it is named.
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await page.getByLabel('Name', { exact: true }).fill(name);
     await page.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(page.getByRole('status')).toHaveText(`Connection ${name} created.`);
 
