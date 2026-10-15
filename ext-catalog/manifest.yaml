@@ -4,11 +4,41 @@ id: io.github.mosaikit.ext.catalog
 version: 0.1.0
 name: Catalog
 description: The file manager of an organization, with folders, sub-folders and sharing.
-kind: [app]
+kind: [app, service]
 platform: '>=0.1 <1'
+backend:
+  jar: lib/ext-catalog.jar
+  api: catalog
+database:
+  # The tree of folders and files and their metadata; the content of files goes to the file service
+  # of the kernel (MK-041).
+  schema: ext_catalog
+# Folders and files are resources of the kernel (MK-054): sharing, search and audit apply to them as
+# to any other resource. The levels are those of the sharing of the catalog (EXT-003); a level on a
+# folder also counts on what it holds.
+resources:
+  - type: folder
+    title: Folder
+    i18n: { it: { title: Cartella } }
+    levels:
+      - { name: read, title: Read, i18n: { it: { title: Lettura } } }
+      - { name: edit, title: Edit, edits: true, i18n: { it: { title: Modifica } } }
+      - { name: manage, title: Manage, edits: true, i18n: { it: { title: Gestione } } }
+    subjects: [person, group, organization, link]
+  - type: file
+    title: File
+    i18n: { it: { title: File } }
+    levels:
+      - { name: read, title: Read, i18n: { it: { title: Lettura } } }
+      - { name: edit, title: Edit, edits: true, i18n: { it: { title: Modifica } } }
+      - { name: manage, title: Manage, edits: true, i18n: { it: { title: Gestione } } }
+    subjects: [person, group, organization, link]
 frontend:
   entry: web/index.js
   isolation: module
+  # Used when the shell isolates the frontend in an iframe (MK-014).
+  bridge:
+    services: [api]
 contributes:
   # The app bar of the shell (MK-025); the texts in other languages are in i18n (MK-053).
   rail.app:
