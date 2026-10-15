@@ -81,7 +81,8 @@ jobs:
           if [ -n "$folders" ]; then python3 tools/check_self_contained.py $folders; fi
 
   # EXT-102: each selected folder with a build, extracted with git filter-repo as a repository of its
-  # own, builds and passes its tests on the latest snapshot of Mosaikit.
+  # own, builds and passes its tests on the latest snapshot of Mosaikit, after the extensions of this
+  # repository it requires, each extracted, built and installed first (tools/build_steps.py).
   build:
     needs: affected
     if: needs.affected.outputs.built != '[]'
