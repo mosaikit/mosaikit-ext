@@ -3,12 +3,14 @@
 #
 # A fixture of the tests of the catalog (EXT-105): the kind "text note" (*.note, text/x-note, or a text
 # that starts with "NOTE:"), with its icon, a preview, two states and an action, as an extension of a
-# product adds its own kinds of files to the file manager.
+# product adds its own kinds of files to the file manager. It reads its notes again in its jobs through
+# signed links to their content, without a copy (EXT-107), and has an app, which an organization turns
+# off to make the kind absent there (EXT-106).
 id: org.example.textnotes
 version: 0.1.0
 name: Text notes (fixture)
 description: A kind of files of the catalog for its tests, with a preview and an action.
-kind: [service]
+kind: [app, service]
 platform: '>=0.1 <1'
 # The catalog is used when it is there: without it, the extension has nothing to do.
 optional:
@@ -25,6 +27,14 @@ frontend:
   entry: web/index.js
   isolation: module
 contributes:
+  # Turning its app off in an organization turns the extension off there (MK-030, MK-133).
+  rail.app:
+    - id: notes
+      title: Text notes
+      route: /app/text-notes
+      element: example-text-notes-app
+      icon: web/note.svg
+      order: 90
   catalog.file-kind:
     - id: note
       kind: text-note
@@ -42,6 +52,6 @@ contributes:
           action.count: Conta le parole
 libraries:
   # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
-  - jar: 'lib/ext-catalog-api-1.0.0.jar'
-    coordinates: 'io.github.mosaikit.ext:ext-catalog-api:1.0.0'
-    sha256: 'f77a5b5ddc0219e34bad05a06226d7f02f443cba1f9ae1c36113785962565f0c'
+  - jar: 'lib/ext-catalog-api-1.1.0.jar'
+    coordinates: 'io.github.mosaikit.ext:ext-catalog-api:1.1.0'
+    sha256: 'b7c26e130afdbaffb932d8c772a2be2b09e6dc919ff340b71371d9f23e7e8c11'

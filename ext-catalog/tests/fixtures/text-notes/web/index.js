@@ -4,10 +4,13 @@
 /**
  * The frontend of the fixture "text notes" (EXT-105): the preview of a note and its action "Count words",
  * custom elements that the catalog creates for the files of the kind and gives the file in their
- * property `file` ({ id, name, contentType, size, fileKind, url() }, url() a signed link to its content).
+ * property `file` ({ id, name, contentType, size, fileKind, url() }, url() a signed link to its content),
+ * and an app that only says what the extension is: an organization turns it off to make the kind absent
+ * there (EXT-106).
  */
 const PREVIEW = 'example-text-note-preview';
 const COUNT = 'example-text-note-count';
+const APP = 'example-text-notes-app';
 
 export default {
   activate(context) {
@@ -34,6 +37,17 @@ export default {
           this.replaceChildren(pre);
           const response = await fetch(await file.url(), { credentials: 'omit' });
           pre.textContent = response.ok ? await response.text() : String(response.status);
+        }
+      },
+    );
+
+    customElements.define(
+      APP,
+      class extends HTMLElement {
+        connectedCallback() {
+          const p = document.createElement('p');
+          p.textContent = italian() ? 'Le note di testo sono file del catalogo.' : 'Text notes are files of the catalog.';
+          this.replaceChildren(p);
         }
       },
     );

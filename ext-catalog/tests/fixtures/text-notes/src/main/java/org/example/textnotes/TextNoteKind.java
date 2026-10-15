@@ -18,8 +18,9 @@ import java.util.Set;
 /**
  * The kind "text note" (EXT-105): a file named *.note, of type text/x-note, or whose text starts with
  * "NOTE:". When a note is stored, replaced or found again, the kind reads it on the server and records
- * how many words it has (counted), or that it has none (empty); every change it is told is kept by
- * {@link ReceivedEvents}, for the tests.
+ * how many words it has (counted), or that it has none (empty), and reads it again through a signed link
+ * of the catalog, as a process of the extension that loads it elsewhere would (EXT-107); every change it
+ * is told is kept by {@link ReceivedEvents}, for the tests.
  */
 @ApplicationScoped
 public class TextNoteKind implements FileKind {
@@ -54,6 +55,7 @@ public class TextNoteKind implements FileKind {
     public void changed(FileEvent event) {
         CatalogFile file = event.file();
         String text = null;
+        LinkedContent.Read linked = null;
         if (event.change() != Change.DELETED) {
             text = read(file);
             if (READS.contains(event.change())) {
@@ -61,9 +63,10 @@ public class TextNoteKind implements FileKind {
                 file.record(words == 0
                         ? FileState.of("empty", "The note has no words.")
                         : FileState.of("counted", words == 1 ? "1 word" : words + " words"));
+                linked = LinkedContent.read(file);
             }
         }
-        received.add(event, text);
+        received.add(event, text, linked);
     }
 
     static String read(CatalogFile file) {

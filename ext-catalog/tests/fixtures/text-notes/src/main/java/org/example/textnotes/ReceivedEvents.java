@@ -18,6 +18,9 @@ public class ReceivedEvents {
      * A change as the kind saw it.
      *
      * @param content the content of the file, read on the server; {@code null} for a file deleted
+     * @param link the signed link to the content the kind got in its job, when it read the file through
+     *     one (EXT-107)
+     * @param linked what the kind read through that link
      */
     public record Received(
             String change,
@@ -28,11 +31,13 @@ public class ReceivedEvents {
             List<String> path,
             String kind,
             Map<String, String> details,
-            String content) {}
+            String content,
+            String link,
+            String linked) {}
 
     private final List<Received> received = new ArrayList<>();
 
-    synchronized void add(FileEvent event, String content) {
+    synchronized void add(FileEvent event, String content, LinkedContent.Read read) {
         CatalogFile file = event.file();
         received.add(new Received(
                 event.change().name(),
@@ -43,7 +48,9 @@ public class ReceivedEvents {
                 file.path(),
                 file.kind(),
                 event.details(),
-                content));
+                content,
+                read == null ? null : read.link(),
+                read == null ? null : read.content()));
     }
 
     synchronized List<Received> all() {
