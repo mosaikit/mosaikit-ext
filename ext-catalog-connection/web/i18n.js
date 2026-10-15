@@ -36,7 +36,13 @@ export const MESSAGES = {
     refusedTitle: 'Connectors refused',
     refused: 'The connector of {extension} is refused: check the field {field} of its declaration.',
     contents: 'Contents of {name}',
-    contentsEmpty: 'Nothing here.',
+    contentsEmpty: 'Nothing here: the source holds no pieces at this level.',
+    contentsUnreachable: 'The source does not answer: {detail}',
+    contentsNeedsDeclaration: 'The source does not describe what it contains: declare its pieces to use them. {detail}',
+    contentsNotReadable: 'This kind of content cannot be read yet. {detail}',
+    uses: 'Uses of {name}',
+    columns: 'Columns: {list}',
+    moreColumns: '{count} more',
     top: 'Top level',
     more: 'More',
     close: 'Close',
@@ -73,6 +79,10 @@ export const MESSAGES = {
       stream: 'Stream',
       files: 'Files',
     },
+    kind: {
+      'materialized-view': 'materialized view',
+      'foreign-table': 'foreign table',
+    },
   },
   it: {
     title: 'Connessioni',
@@ -103,7 +113,13 @@ export const MESSAGES = {
     refusedTitle: 'Connettori rifiutati',
     refused: 'Il connettore di {extension} è rifiutato: controlla il campo {field} della sua dichiarazione.',
     contents: 'Contenuto di {name}',
-    contentsEmpty: 'Qui non c’è niente.',
+    contentsEmpty: 'Qui non c’è niente: la fonte non contiene parti a questo livello.',
+    contentsUnreachable: 'La fonte non risponde: {detail}',
+    contentsNeedsDeclaration: 'La fonte non descrive cosa contiene: dichiarane le parti per usarle. {detail}',
+    contentsNotReadable: 'Questo tipo di contenuto non si può ancora leggere. {detail}',
+    uses: 'Usi di {name}',
+    columns: 'Colonne: {list}',
+    moreColumns: 'altre {count}',
     top: 'Livello principale',
     more: 'Altri',
     close: 'Chiudi',
@@ -139,6 +155,17 @@ export const MESSAGES = {
       api: 'API',
       stream: 'Flusso',
       files: 'File',
+    },
+    kind: {
+      schema: 'schema',
+      table: 'tabella',
+      view: 'vista',
+      'materialized-view': 'vista materializzata',
+      'foreign-table': 'tabella esterna',
+      topic: 'topic',
+      endpoint: 'endpoint',
+      folder: 'cartella',
+      file: 'file',
     },
   },
 };
@@ -178,4 +205,31 @@ export function titleOf(locale, connector) {
   const found = Object.keys(titles).find((key) => key.toLowerCase() === tag.toLowerCase())
     ?? Object.keys(titles).find((key) => key.toLowerCase() === main.toLowerCase());
   return found ? titles[found] : connector.title;
+}
+
+/** The kind of a piece in the language of the locale: the words of the kinds it knows, or the kind itself. */
+export function kindName(locale, kind) {
+  return MESSAGES[languageOf(locale)].kind[kind] ?? MESSAGES.en.kind[kind] ?? kind;
+}
+
+/**
+ * A text attribute of the contribution of another extension in the language of the locale (MK-053):
+ * from its i18n block for the locale or its main language, otherwise the attribute itself.
+ */
+export function contributionText(contribution, key, locale) {
+  const attributes = contribution?.attributes ?? {};
+  const i18n = attributes.i18n ?? {};
+  const tag = String(locale ?? '').toLowerCase();
+  const main = tag.split('-')[0];
+  for (const [language, texts] of Object.entries(i18n)) {
+    if (language.toLowerCase() === tag && typeof texts?.[key] === 'string') {
+      return texts[key];
+    }
+  }
+  for (const [language, texts] of Object.entries(i18n)) {
+    if (language.toLowerCase() === main && typeof texts?.[key] === 'string') {
+      return texts[key];
+    }
+  }
+  return typeof attributes[key] === 'string' ? attributes[key] : undefined;
 }

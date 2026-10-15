@@ -5,9 +5,9 @@ package org.example.connector.sample;
 import io.github.mosaikit.ext.catalog.connection.api.v1.ConnectionSettings;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Connector;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Declaration;
-import io.github.mosaikit.ext.catalog.connection.api.v1.Entry;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Page;
 import io.github.mosaikit.ext.catalog.connection.api.v1.Paging;
+import io.github.mosaikit.ext.catalog.connection.api.v1.Piece;
 import io.github.mosaikit.ext.catalog.connection.api.v1.TestResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.List;
@@ -46,10 +46,10 @@ public class SampleFilesConnector implements Connector {
     }
 
     @Override
-    public Page<Entry> list(ConnectionSettings settings, String path, Paging paging) {
-        if (!path.isEmpty()) {
-            throw new IllegalArgumentException("No such path: " + path);
+    public Page<Piece> list(ConnectionSettings settings, String parent, Paging paging) {
+        if (!parent.isEmpty()) {
+            throw new IllegalArgumentException("No such container: " + parent);
         }
-        return new Page<>(List.of(new Entry("readme.txt", "readme.txt", "file", false)), false);
+        return new Page<>(List.of(new Piece("readme.txt", "readme.txt", "file", false)), false);
     }
 }

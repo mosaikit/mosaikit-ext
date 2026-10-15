@@ -31,9 +31,13 @@ import java.util.Optional;
  *     public String extension() { return "org.example.ext.catalog.connection.files"; }
  *     public Declaration declaration() { ... }
  *     public TestResult test(ConnectionSettings settings) { ... }
- *     public Page<Entry> list(ConnectionSettings settings, String path, Paging paging) { ... }
+ *     public Page<Piece> list(ConnectionSettings settings, String parent, Paging paging) { ... }
  * }
  * }</pre>
+ *
+ * <p>Every connector lists its contents in the same shape, {@link Piece}: an id, a name, a kind and
+ * the facts it knows (EXT-019). What each piece can be used for comes from the extensions that consume
+ * data, not from the connector.
  */
 @Contract(extension = Connector.FRAMEWORK, name = Connector.CONTRACT, version = 1)
 public interface Connector extends ContractImplementation {
@@ -59,12 +63,21 @@ public interface Connector extends ContractImplementation {
     TestResult test(ConnectionSettings settings);
 
     /**
-     * The contents of a source at a path: its top level with an empty path, then what a container entry
-     * holds, such as the tables of a schema or the files of a folder, with the path of that entry.
+     * The pieces of a source (EXT-019): its top level with an empty parent, then what a container
+     * holds, such as the tables of a schema or the files of a folder, with the id of that container. A
+     * source, or a container, with nothing in it is an empty page.
      *
-     * @throws IllegalArgumentException when the path does not exist in the source
+     * <p>By default a connector cannot list its contents yet ({@link
+     * ContentsUnavailableException.Reason#NOT_READABLE}).
+     *
+     * @param parent the id of a container piece, or empty for the top level
+     * @throws IllegalArgumentException when the parent does not exist in the source, or is not a container
+     * @throws ContentsUnavailableException when the source does not answer, does not describe its
+     *     contents, or holds a kind that the connector cannot read yet; each is told apart to the person
      */
-    Page<Entry> list(ConnectionSettings settings, String path, Paging paging);
+    default Page<Piece> list(ConnectionSettings settings, String parent, Paging paging) {
+        throw ContentsUnavailableException.notReadable("This connector cannot list the contents of its sources yet");
+    }
 
     /**
      * The address of the source of a connection with these settings, such as {@code db.example.org:5432/sales}
@@ -79,5 +92,21 @@ public interface Connector extends ContractImplementation {
      */
     default Optional<String> address(ConnectionSettings settings) {
         return Optional.empty();
+    }
+
+    /**
+     * Runs a query on the source and returns at most {@code limit} rows (EXT-040), for the sources that
+     * take queries, such as SQL databases. The query only reads: a connector runs it so that it cannot
+     * change the source, such as in a read-only transaction.
+     *
+     * <p>By default a connector runs no queries ({@link UnsupportedOperationException}).
+     *
+     * @param statement the query, in the language of the source
+     * @param limit the most rows to return, from 1; the result says whether the source had more
+     * @throws IllegalArgumentException when the source refuses the query, with its error
+     * @throws ContentsUnavailableException when the source does not answer
+     */
+    default Rows query(ConnectionSettings settings, String statement, int limit) {
+        throw new UnsupportedOperationException("This connector runs no queries");
     }
 }

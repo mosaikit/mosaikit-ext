@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Massimo Antonini
 // SPDX-License-Identifier: MPL-2.0
-import { categoryName, titleOf, translator } from './i18n.js';
+import { categoryName, contributionText, kindName, titleOf, translator } from './i18n.js';
 import { LIST_STYLE, ListPage } from './list.js';
 import { generatedThumbnail } from './thumbnail.js';
 
@@ -16,6 +16,12 @@ import { generatedThumbnail } from './thumbnail.js';
  * connector, filtered by the types actually configured (EXT-011); each card shows a thumbnail,
  * uploaded or generated from the name, the description or else the address of the source, and the
  * owner (EXT-015).
+ *
+ * The contents of a connection come in one shape whatever its connector (EXT-019): pieces with an id,
+ * a name, a kind and facts. What each piece can be used for comes from the extensions that consume
+ * data: they contribute uses to the point catalog.connection.use (version 1), each with the kinds and
+ * the facts it needs, and the app offers on a piece the uses its kind and facts allow, while their
+ * extension is active.
  */
 
 const ELEMENT = 'mosaikit-ext-catalog-connection';
@@ -23,6 +29,10 @@ const API = '/api/v1/ext/connections';
 const PAGE = 100;
 /** The placeholder of the platform for what an absent extension provides (MK-135). */
 const PLACEHOLDER = 'mk-reference-placeholder';
+/** The point to which the extensions that consume data contribute their uses of a piece (EXT-019). */
+const USES = 'catalog.connection.use';
+/** The columns shown under a piece before the rest is summed up. */
+const SHOWN_COLUMNS = 6;
 /** The identifier of the extension, which owns the files of the uploaded thumbnails. */
 const EXTENSION = 'io.github.mosaikit.ext.catalog.connection';
 /** The images a thumbnail may be, as the backend takes them. */
@@ -95,8 +105,15 @@ const STYLE = `
   nav.path ol { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; padding: 0; }
   nav.path li + li::before { content: '/'; color: var(--mk-muted); margin-right: 4px; }
   ul.entries { list-style: none; margin: 0; padding: 0; }
-  ul.entries li { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--mk-line); }
+  ul.entries > li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; padding: 6px 0;
+                    border-bottom: 1px solid var(--mk-line); }
   ul.entries .kind { color: var(--mk-muted); font-size: 12px; display: inline; }
+  ul.entries .columns { flex-basis: 100%; color: var(--mk-muted); font-size: 12px; overflow-wrap: anywhere; }
+  ul.uses { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 0 auto; padding: 0; }
+  ul.uses li { font-size: 12px; padding: 1px 8px; border: 1px solid var(--mk-line); border-radius: 999px;
+               background: var(--mk-bg); }
+  .state { margin: 8px 0; color: var(--mk-muted); }
+  .state[data-state='unreachable'] { color: var(--mk-danger); }
   [role='status'] { min-height: 1.2em; margin: 8px 0; color: var(--mk-muted); }
   [role='status'].error { color: var(--mk-danger); }
   [hidden] { display: none !important; }
@@ -156,7 +173,7 @@ const extension = {
             <h2 id="contents-title"></h2>
             <nav class="path"><ol></ol></nav>
             <ul class="entries"></ul>
-            <p class="muted nothing" hidden></p>
+            <p class="state" role="note" hidden></p>
             <div class="actions"><button type="button" class="more"></button><button type="button" class="close"></button></div>
           </section>
           <p class="version"></p>`;
@@ -194,7 +211,6 @@ const extension = {
             none: t('noTypesConfigured'),
           },
         });
-        root.querySelector('.nothing').textContent = t('contentsEmpty');
         root.querySelector('button.more').textContent = t('more');
         root.querySelector('button.close').textContent = t('close');
         root.querySelector('button.new').addEventListener('click', () => this.openCreate());
@@ -278,7 +294,7 @@ const extension = {
         const connector = this.connectorOf(connection);
         if (connector) {
           const title = document.createElement('h3');
-          title.append(button(connection.name, () => this.openContents(connection, ''), 'link'));
+          title.append(button(connection.name, () => this.openContents(connection, []), 'link'));
           body.append(title, subtitle(connection));
         } else {
           // A connection whose connector is absent is kept as it is: the placeholder of the
@@ -298,7 +314,7 @@ const extension = {
         cell.className = 'kind';
         cell.append(this.thumbnail(connection));
         if (this.connectorOf(connection)) {
-          cell.append(button(connection.name, () => this.openContents(connection, ''), 'link'));
+          cell.append(button(connection.name, () => this.openContents(connection, []), 'link'));
         } else {
           cell.append(placeholder(connection, this.t, context.locale));
         }
@@ -630,68 +646,152 @@ const extension = {
         }
       }
 
-      /** The contents of a connection at a path, as its connector lists them. */
-      async openContents(connection, path) {
+      /**
+       * The pieces of a connection (EXT-019), as its connector lists them: the top level with an empty
+       * trail, then what the last container of the trail holds. The trail is the containers opened, by
+       * id and name: ids are the connector's, never split by the app.
+       */
+      async openContents(connection, trail = []) {
         const t = this.t;
         const section = this.root.querySelector('section.contents');
-        this.browsing = { connection, path, offset: 0 };
+        this.browsing = { connection, trail, offset: 0 };
         section.querySelector('#contents-title').textContent = t('contents', connection);
         const crumbs = section.querySelector('nav.path ol');
-        const steps = path ? path.split('/') : [];
         crumbs.replaceChildren(
-          ...[{ name: t('top'), path: '' }, ...steps.map((name, i) => ({ name, path: steps.slice(0, i + 1).join('/') }))].map(
-            (step, i, all) => {
-              const item = document.createElement('li');
-              if (i === all.length - 1) {
-                item.textContent = step.name;
-                item.setAttribute('aria-current', 'page');
-              } else {
-                item.append(button(step.name, () => this.openContents(connection, step.path), 'link'));
-              }
-              return item;
-            },
-          ),
+          ...[{ name: t('top') }, ...trail].map((step, i, all) => {
+            const item = document.createElement('li');
+            if (i === all.length - 1) {
+              item.textContent = step.name;
+              item.setAttribute('aria-current', 'page');
+            } else {
+              item.append(button(step.name, () => this.openContents(connection, trail.slice(0, i)), 'link'));
+            }
+            return item;
+          }),
         );
         section.querySelector('ul.entries').replaceChildren();
+        const state = section.querySelector('.state');
+        state.hidden = true;
+        state.removeAttribute('data-state');
+        section.querySelector('button.more').hidden = true;
         section.hidden = false;
         await this.listMore();
       }
 
       async listMore() {
-        const { connection, path, offset } = this.browsing;
+        const t = this.t;
+        const { connection, trail, offset } = this.browsing;
+        const parent = trail.at(-1)?.id ?? '';
         const section = this.root.querySelector('section.contents');
         try {
           const page = await call(
-            `/connections/${encodeURIComponent(connection.id)}/contents?path=${encodeURIComponent(path)}&offset=${offset}&limit=${PAGE}`,
+            `/connections/${encodeURIComponent(connection.id)}/contents?parent=${encodeURIComponent(parent)}&offset=${offset}&limit=${PAGE}`,
           );
+          const state = section.querySelector('.state');
+          if (page.state !== 'listed') {
+            // Never an empty list: why there is nothing, in the words of each case.
+            state.dataset.state = page.state;
+            state.textContent = t(STATE_MESSAGES[page.state] ?? 'contentsEmpty', { detail: page.detail ?? '' }).trim();
+            state.hidden = false;
+          }
+          const uses = usesContributed(context);
           const list = section.querySelector('ul.entries');
-          for (const entry of page.items) {
-            const item = document.createElement('li');
-            if (entry.container) {
-              item.append(button(entry.name, () => this.openContents(connection, entry.path), 'link'));
-            } else {
-              const name = document.createElement('span');
-              name.textContent = entry.name;
-              item.append(name);
-            }
-            const kind = document.createElement('span');
-            kind.className = 'kind';
-            kind.textContent = entry.kind;
-            item.append(kind);
-            list.append(item);
+          for (const piece of page.items) {
+            list.append(this.pieceItem(connection, trail, piece, uses));
           }
           this.browsing.offset = offset + page.items.length;
           section.querySelector('button.more').hidden = !page.more;
-          section.querySelector('.nothing').hidden = list.children.length > 0;
         } catch (error) {
-          this.status(this.t('failed', { message: error.message }), true);
+          this.status(t('failed', { message: error.message }), true);
         }
+      }
+
+      /** A piece: its name (which opens it when it is a container), its kind, its uses and its columns. */
+      pieceItem(connection, trail, piece, uses) {
+        const t = this.t;
+        const item = document.createElement('li');
+        item.dataset.id = piece.id;
+        item.dataset.kind = piece.kind;
+        if (piece.container) {
+          item.append(button(piece.name, () => this.openContents(connection, [...trail, { id: piece.id, name: piece.name }]), 'link name'));
+        } else {
+          const name = document.createElement('span');
+          name.className = 'name';
+          name.textContent = piece.name;
+          item.append(name);
+        }
+        const kind = document.createElement('span');
+        kind.className = 'kind';
+        kind.textContent = kindName(context.locale, piece.kind);
+        item.append(kind);
+        const offered = uses.filter((use) => allows(use, piece));
+        if (offered.length > 0) {
+          const list = document.createElement('ul');
+          list.className = 'uses';
+          list.setAttribute('aria-label', t('uses', { name: piece.name }));
+          list.append(
+            ...offered.map((use) => {
+              const entry = document.createElement('li');
+              entry.dataset.use = `${use.extensionId}/${use.id}`;
+              entry.textContent = contributionText(use, 'title', context.locale) ?? use.id;
+              const description = contributionText(use, 'description', context.locale);
+              if (description) {
+                entry.title = description;
+              }
+              return entry;
+            }),
+          );
+          item.append(list);
+        }
+        const columns = Array.isArray(piece.facts?.columns) ? piece.facts.columns : [];
+        if (columns.length > 0) {
+          const line = document.createElement('span');
+          line.className = 'columns';
+          const shown = columns.slice(0, SHOWN_COLUMNS).map((column) => `${column.name} ${column.type ?? ''}`.trim());
+          if (columns.length > SHOWN_COLUMNS) {
+            shown.push(t('moreColumns', { count: columns.length - SHOWN_COLUMNS }));
+          }
+          line.textContent = t('columns', { list: shown.join(', ') });
+          item.append(line);
+        }
+        return item;
       }
     }
 
     customElements.define(ELEMENT, Connections);
   },
 };
+
+/** The message of each state of a listing that has nothing to show (EXT-019). */
+const STATE_MESSAGES = {
+  empty: 'contentsEmpty',
+  unreachable: 'contentsUnreachable',
+  'needs-declaration': 'contentsNeedsDeclaration',
+  'not-readable': 'contentsNotReadable',
+};
+
+/**
+ * The uses that the active extensions contribute (EXT-019), each with the kinds of pieces it takes and
+ * the facts it needs; a contribution without kinds is ignored. The shell gives only the contributions
+ * of the extensions active in the organization, so the use of a removed one is not offered.
+ */
+function usesContributed(context) {
+  return (context.contributionsTo?.(USES) ?? []).filter(
+    (use) => Array.isArray(use.attributes?.kinds) && use.attributes.kinds.length > 0,
+  );
+}
+
+/** Whether a use takes a piece: one of its kinds, and every fact it needs, present and not empty. */
+function allows(use, piece) {
+  const { kinds, facts = [] } = use.attributes;
+  if (!kinds.includes(piece.kind)) {
+    return false;
+  }
+  return facts.every((fact) => {
+    const value = piece.facts?.[fact];
+    return value !== undefined && value !== null && value !== false && !(Array.isArray(value) && value.length === 0);
+  });
+}
 
 /**
  * What stands for a connection whose connector is absent: the placeholder of the platform,

@@ -39,6 +39,30 @@ frontend:
   # Used when the shell isolates the frontend in an iframe (MK-014).
   bridge:
     services: [api]
+  # What a piece of a connection can be used for (EXT-019): the extensions that consume data, such as
+  # dashboards or processes, contribute their uses, each naming the kinds of pieces it takes and the
+  # facts it needs; the app offers on each piece the uses its kind and facts allow, while their
+  # extension is active. The connectors never name a use.
+  points:
+    - name: catalog.connection.use
+      version: 1
+      schema:
+        type: object
+        required: [title, kinds]
+        additionalProperties: false
+        properties:
+          title: {type: string, minLength: 1, maxLength: 80, description: 'What the piece becomes, such as Dashboard'}
+          description: {type: string, maxLength: 200, description: 'A sentence on the use, shown as a hint'}
+          kinds:
+            type: array
+            maxItems: 32
+            description: 'The kinds of pieces the use takes, such as table, view, topic or endpoint; at least one'
+            items: {type: string, minLength: 1, maxLength: 64}
+          facts:
+            type: array
+            maxItems: 16
+            description: 'The facts a piece must have, present and not empty, such as columns or geometry'
+            items: {type: string, minLength: 1, maxLength: 64}
 contributes:
   # The app bar of the shell (MK-025); the texts in other languages are in i18n (MK-053).
   rail.app:
@@ -54,4 +78,4 @@ libraries:
   # Written by the build of the extension from its runtime dependencies (MK-131): do not edit.
   - jar: 'lib/ext-catalog-connection-api-0.1.0.jar'
     coordinates: 'io.github.mosaikit.ext:ext-catalog-connection-api:0.1.0'
-    sha256: '9db471bb52ce2ae9b8b81b6f79127cae4d136441e07f82de04dd59145d9af602'
+    sha256: '82c4a5464f0bf3547b89b18935922f30edf7367bbceffb8d9189ad3e7fd5de40'
