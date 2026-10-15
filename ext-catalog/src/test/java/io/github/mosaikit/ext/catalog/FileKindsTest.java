@@ -339,9 +339,18 @@ class FileKindsTest {
             return List.of();
         }
 
+        /** Signed links made so far, by the content they name (EXT-107). */
+        final List<UUID> linked = new ArrayList<>();
+
         @Override
         public SignedLink link(String extension, UUID id, Duration validFor) {
-            throw new UnsupportedOperationException();
+            if (!contents.containsKey(id)) {
+                throw new NoSuchElementException("No file " + id);
+            }
+            linked.add(id);
+            Duration validity = validFor == null ? Duration.ofDays(7) : validFor;
+            return new SignedLink(
+                    "/api/v1/files/links/" + id + "?sig=1", "/api/v1/files/links/", "sig=1", NOW.plus(validity));
         }
 
         @Override

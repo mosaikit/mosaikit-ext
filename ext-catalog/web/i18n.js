@@ -129,6 +129,9 @@ export const MESSAGES = {
     actionsOf: 'Actions on {name}',
     actionOn: '{action}: {name}',
     replace: 'Replace content',
+    // EXT-106: a file of a kind whose extension is absent; the placeholder of the platform says the rest.
+    kindLabel: '{kind} (kind of file)',
+    kindAbsent: 'Not available: {kind}. The extension that provides it is not active in this organization.',
     replaced: 'The content of {name} was replaced.',
     notReplaced: 'The content was not replaced: {reason}',
     close: 'Close',
@@ -254,6 +257,8 @@ export const MESSAGES = {
     actionsOf: 'Azioni su {name}',
     actionOn: '{action}: {name}',
     replace: 'Sostituisci il contenuto',
+    kindLabel: '{kind} (genere di file)',
+    kindAbsent: "Non disponibile: {kind}. L'estensione che lo fornisce non è attiva in questa organizzazione.",
     replaced: 'Il contenuto di {name} è stato sostituito.',
     notReplaced: 'Il contenuto non è stato sostituito: {reason}',
     close: 'Chiudi',

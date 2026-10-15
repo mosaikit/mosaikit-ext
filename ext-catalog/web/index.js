@@ -25,8 +25,11 @@ import { zip } from './zip.js';
  * reads with context.contributionsTo: { kind, title, icon, preview, states, actions: [{ id, title,
  * element }] }, the texts in other languages in i18n (title, state.<state>, action.<id>). The preview and
  * each action are custom elements of the extension, given the file in their property file; an action
- * that changed the file says so with the event catalog-file-changed. Without the extension, its files
- * are plain files.
+ * that changed the file says so with the event catalog-file-changed. While the extension is absent from
+ * the organization (EXT-106), its files keep their kind and state and work as plain files, and the list
+ * and the detail show the placeholder of the platform (mk-reference-placeholder, MK-135) for the kind,
+ * which tells administrators which extension to install or turn on; when the extension comes or goes
+ * (MK-133), the open page shows the files again, without a reload.
  */
 
 const ELEMENT = 'mosaikit-ext-catalog';
@@ -37,6 +40,12 @@ const UPLOADS_API = '/api/v1/ext/catalog/uploads';
 const DOWNLOADS_API = '/api/v1/ext/catalog/downloads';
 /** The extension point of the kinds of files of other extensions, version 1 (EXT-105). */
 const FILE_KINDS = 'catalog.file-kind';
+/** Where the kernel resolves references, here to the kind of an absent extension (MK-135). */
+const REFERENCES = '/api/v1/resources/references/resolve';
+/** The placeholder of the platform for what an absent extension provides (MK-135). */
+const PLACEHOLDER = 'mk-reference-placeholder';
+/** How many times the list is read again while the server and the presence of the shell disagree. */
+const SETTLE_TRIES = 5;
 /** Where the shell serves the files of an extension, such as the icon of a kind. */
 const ASSETS = '/api/v1/extension-assets';
 const ROUTE = '/app/catalog';
@@ -125,6 +134,10 @@ const STYLE = `
   dialog ul.folders { list-style: none; margin: 8px 0; padding: 0; max-height: 280px; overflow-y: auto; }
   dialog ul.folders li { padding: 2px 0; }
   td.name img.kind { width: 16px; height: 16px; flex: none; }
+  td.name.absent { flex-wrap: wrap; }
+  td.name .absent-kind { order: 1; flex: 1 1 100%; }
+  .absent-kind::part(box) { padding: 4px 8px; font-size: 12px; }
+  section.detail .absent-kind { margin: 8px 0; }
   .badge { display: inline-block; font-size: 12px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--mk-line);
            color: var(--mk-muted); white-space: nowrap; }
   .badge.state { border-color: var(--mk-accent); color: var(--mk-accent); }
@@ -173,6 +186,12 @@ const extension = {
         this.cut = [];
         /** The kinds of files of other extensions, by <extension>/<kind> (EXT-105). */
         this.kinds = fileKinds(context);
+        /** What the kernel said of the kinds whose extension is absent, by <extension>/<kind> (EXT-106). */
+        this.absent = new Map();
+        this.settling = 0;
+        // MK-133: when the extension of a kind comes or goes, the list shows its files again.
+        this.stopPresence?.();
+        this.stopPresence = context.extensions?.subscribe?.((change) => this.onPresence(change));
         /** The file whose detail is shown. */
         this.detail = null;
         this.render();
@@ -182,6 +201,9 @@ const extension = {
 
       disconnectedCallback() {
         window.removeEventListener('popstate', this.onPopState);
+        this.stopPresence?.();
+        this.stopPresence = undefined;
+        clearTimeout(this.settleTimer);
       }
 
       render() {
@@ -242,6 +264,7 @@ const extension = {
                   <button type="button" class="close"></button>
                 </header>
                 <dl></dl>
+                <div class="absent" hidden></div>
                 <div class="preview" hidden></div>
                 <div class="kind-actions" role="group" hidden></div>
                 <div class="file-actions">
@@ -440,6 +463,8 @@ const extension = {
           }
         }
         this.showFolder(folder);
+        void this.resolveAbsent(folder.items);
+        this.settle(folder.items);
         const detail = this.detail && folder.items.find((item) => item.id === this.detail.id);
         if (detail) {
           this.showDetail(detail);
@@ -613,7 +638,7 @@ const extension = {
         });
         name.append(box);
         const kind = this.kindOf(item);
-        if (kind?.icon) {
+        if (kind?.icon && !kind.absent) {
           const icon = document.createElement('img');
           icon.className = 'kind';
           icon.alt = '';
@@ -634,8 +659,12 @@ const extension = {
           open.title = t('downloadItem', { name: item.name });
           open.addEventListener('click', () => void this.download([item]));
           name.append(open);
-          // EXT-105: the kind and its state, the actions of the kind, and the detail of the file.
-          if (kind) {
+          // EXT-105: the kind and its state, the actions of the kind, and the detail of the file; EXT-106:
+          // the placeholder of the platform for a kind whose extension is absent.
+          if (kind?.absent) {
+            name.classList.add('absent');
+            name.append(this.placeholder(kind));
+          } else if (kind) {
             name.append(badge(kind.title, 'kind'));
             if (item.fileKind.state) {
               name.append(badge(this.stateText(kind, item.fileKind.state), 'state'));
@@ -643,7 +672,7 @@ const extension = {
           }
           const actions = document.createElement('span');
           actions.className = 'row-actions';
-          for (const action of kind?.actions ?? []) {
+          for (const action of kind?.absent ? [] : (kind?.actions ?? [])) {
             actions.append(this.actionButton(item, action));
           }
           const details = document.createElement('button');
@@ -689,8 +718,9 @@ const extension = {
       }
 
       /**
-       * The kind of a file as the app shows it (EXT-105): the contribution of its extension, when the
-       * server says the file is of a kind whose extension is active; null for a plain file.
+       * The kind of a file as the app shows it (EXT-105): the contribution of its extension, or its name
+       * when the contribution is not known; absent when the server says that its extension is not
+       * active in the organization (EXT-106); null for a plain file.
        */
       kindOf(item) {
         if (!item.fileKind) {
@@ -703,6 +733,7 @@ const extension = {
         const attributes = contribution?.attributes ?? {};
         return {
           id,
+          absent: item.fileKind.active === false,
           extension: item.fileKind.extension,
           title: text('title', typeof attributes.title === 'string' ? attributes.title : item.fileKind.name),
           icon: typeof attributes.icon === 'string' ? `${ASSETS}/${contribution.extensionId}/${attributes.icon}` : null,
@@ -789,7 +820,10 @@ const extension = {
           }),
         );
         const preview = $('section.detail .preview');
-        if (kind?.preview && customElements.get(kind.preview)) {
+        const absent = $('section.detail .absent');
+        absent.replaceChildren(...(kind?.absent ? [this.placeholder(kind)] : []));
+        absent.hidden = !kind?.absent;
+        if (kind?.preview && !kind.absent && customElements.get(kind.preview)) {
           // The preview is made again only for another file, or a file that changed.
           if (!same || preview.hidden) {
             const element = document.createElement(kind.preview);
@@ -805,9 +839,115 @@ const extension = {
         }
         const actions = $('section.detail .kind-actions');
         actions.setAttribute('aria-label', t('actionsOf', { name: item.name }));
-        actions.replaceChildren(...(kind?.actions ?? []).map((action) => this.actionButton(item, action)));
+        actions.replaceChildren(
+          ...(kind?.absent ? [] : (kind?.actions ?? [])).map((action) => this.actionButton(item, action)),
+        );
         actions.hidden = actions.childElementCount === 0;
         $('section.detail button.replace').hidden = !editable(item);
+      }
+
+      /**
+       * The placeholder of the platform for a kind whose extension is absent (EXT-106, MK-135): what is
+       * missing and, to administrators, which extension to install or turn on, as the kernel answers it.
+       * A frontend isolated in a frame, where the shell does not define the element, says it in a line.
+       */
+      placeholder(kind) {
+        const label = this.t('kindLabel', { kind: kind.title });
+        if (!customElements.get(PLACEHOLDER)) {
+          const note = document.createElement('p');
+          note.className = 'absent-kind muted';
+          note.setAttribute('role', 'note');
+          note.textContent = this.t('kindAbsent', { kind: label });
+          return note;
+        }
+        const element = document.createElement(PLACEHOLDER);
+        element.className = 'absent-kind';
+        element.dataset.kind = kind.id;
+        element.setAttribute('label', label);
+        element.setAttribute('locale', String(context.locale ?? 'en'));
+        element.reference = this.absent.get(kind.id) ?? { status: 'extension-absent' };
+        return element;
+      }
+
+      /**
+       * Asks the kernel about the kinds of the files shown whose extension is absent (MK-135): the kind
+       * as a reference to its extension, whose answer says, to administrators, what brings it back. The
+       * placeholders shown take the answer.
+       */
+      async resolveAbsent(items) {
+        const kinds = new Map();
+        for (const item of items) {
+          const id = item.fileKind ? `${item.fileKind.extension}/${item.fileKind.name}` : null;
+          if (id && item.fileKind.active === false && !this.absent.has(id)) {
+            kinds.set(id, item.fileKind);
+          }
+        }
+        const asked = [...kinds].slice(0, 100);
+        if (asked.length === 0) {
+          return;
+        }
+        let resolved;
+        try {
+          const response = await context.fetch(REFERENCES, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(
+              asked.map(([, kind]) => ({ extension: kind.extension, type: 'file-kind', id: kind.name })),
+            ),
+          });
+          if (!response.ok) {
+            return;
+          }
+          resolved = await response.json();
+        } catch {
+          return;
+        }
+        asked.forEach(([id], index) => {
+          const reference = resolved[index];
+          // Its extension may be active again with the kind gone: then say only that it is not there.
+          this.absent.set(id, reference && reference.status !== 'available' ? reference : { status: 'extension-absent' });
+        });
+        for (const element of this.shadowRoot.querySelectorAll(`${PLACEHOLDER}.absent-kind`)) {
+          const reference = this.absent.get(element.dataset.kind);
+          if (reference) {
+            element.reference = reference;
+          }
+        }
+      }
+
+      /** An extension came or went in the organization (MK-133): the files of its kinds are shown again. */
+      onPresence(change) {
+        const shown = new Set(
+          (this.current?.items ?? []).filter((item) => item.fileKind).map((item) => item.fileKind.extension),
+        );
+        const contributes = [...this.kinds.values()].some((kind) => kind.extensionId === change.extension);
+        if (!shown.has(change.extension) && !contributes) {
+          return;
+        }
+        this.kinds = fileKinds(context);
+        this.absent.clear();
+        this.settling = 0;
+        void this.refresh();
+      }
+
+      /**
+       * Reads the list again, a few times, while the server and the presence the shell keeps disagree on
+       * the extension of a kind shown: the shell may hear of a change just before the server shows it.
+       */
+      settle(items) {
+        clearTimeout(this.settleTimer);
+        const presence = context.extensions;
+        if (typeof presence?.isActive !== 'function') {
+          return;
+        }
+        const differ = items.some(
+          (item) => item.fileKind && presence.isActive(item.fileKind.extension) !== item.fileKind.active,
+        );
+        if (!differ || this.settling >= SETTLE_TRIES) {
+          return;
+        }
+        this.settling += 1;
+        this.settleTimer = setTimeout(() => void this.refresh(), 1000);
       }
 
       hideDetail() {

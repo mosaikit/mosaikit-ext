@@ -8,6 +8,14 @@ and the versions [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A file of a kind whose extension is absent from the organization (not installed, not able to run,
+  or turned off, MK-133) keeps its kind and state and is listed with them, `fileKind.active` `false`,
+  instead of as a plain file: the list and the detail show the placeholder of the platform
+  (`mk-reference-placeholder`, MK-135) in place of the kind, its preview and its actions, saying which
+  kind is missing and, to administrators, which extension to install or turn on; the file is
+  downloaded, moved, renamed, shared, replaced and deleted as any other. When the extension comes or
+  goes, the open page shows its files again without a reload (EXT-106).
+
 - Folders and files declare `inherits: parent` (MK-136): the kernel answers the level of a person
   with the folders above, and the catalog asks it instead of walking the folders itself. A person
   with `manage` on a folder shares what it holds in the dialog of the platform, and the grants of the
@@ -27,6 +35,13 @@ and the versions [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `CatalogFile.link(Duration)` in `io.github.mosaikit.ext:ext-catalog-api` 1.1.0, a minor release of
+  the contract `file-kind` version 1 (EXT-107): a signed, expiring link of the platform to the content
+  of a file of the kind (MK-093), which a process of its extension reads outside the request of a
+  person, so that it loads the file elsewhere without keeping a copy and the file counts once against
+  the storage quota. The link stops working when the file is deleted or replaced; a new one serves
+  the new content. A default method: on a catalog older than 1.1.0 it throws
+  `UnsupportedOperationException`.
 - Kinds of files added by other extensions (EXT-105), through the contract
   `io.github.mosaikit.ext.catalog/file-kind` version 1 (MK-134), whose interfaces are in the new
   library `io.github.mosaikit.ext:ext-catalog-api` 1.0.0 (`api/`): a kind recognizes files by name,

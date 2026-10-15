@@ -14,7 +14,7 @@ one `EXT-nnn.md` each, and its changes in [`CHANGELOG.md`](CHANGELOG.md).
 | `manifest.yaml` | identity, backend, schema, resource types, frontend and contributions of the extension |
 | `src/main/java/` | the backend: the REST API under `/api/v1/ext/catalog` and the tree of folders and files |
 | `db/` | the migrations of the schema `ext_catalog`: the tree (`V1`), kinds of files (`V3`); `V2` kept downloads and pending removals for jobs, which `V4` drops |
-| `api/` | `io.github.mosaikit.ext:ext-catalog-api`, the contracts that other extensions implement (EXT-105): a library of the catalog and of those extensions |
+| `api/` | `io.github.mosaikit.ext:ext-catalog-api`, the contracts that other extensions implement (EXT-105, EXT-107): a library of the catalog and of those extensions |
 | `web/index.js` | the app, a custom element the shell renders at `/app/catalog`; `web/drop.js` reads what is dropped or chosen, `web/zip.js` writes the archive of a download |
 | `web/i18n.js` | the texts of the app in English and Italian, chosen by `context.locale` |
 | `pom.xml` | the build, on the parent of Mosaikit extensions `io.github.mosaikit:mosaikit-extension-parent` |
@@ -146,9 +146,10 @@ contribute the page that shows a folder or a file opened through a link (`shared
 
 Other extensions add kinds of files to the file manager (EXT-105), such as a table, an image or a
 dataset that a product understands, through the contract `io.github.mosaikit.ext.catalog/file-kind`
-version 1 (MK-134). The files stay plain files of the organization, with their content in the file
-service of the kernel: without the extension, the catalog shows them as any other file, and when it
-comes back they are of its kind again.
+version 1 (MK-134). The files stay files of the organization, with their content in the file
+service of the kernel: without the extension, the catalog keeps their kind and state, works on them as
+on any other file and shows the placeholder of the platform for the kind (EXT-106), and when it comes
+back they are of its kind again.
 
 **On the server.** The extension depends on `io.github.mosaikit.ext:ext-catalog-api` (built from
 [`api/`](api/)), which its build copies into its `lib/` and lists among its libraries, declares the
@@ -206,7 +207,32 @@ public class DatasetKind implements FileKind {
 - **State.** `record(FileState.of("loaded"))`, or `FileState.of("failed", "why")`, keeps a state on
   the file, which the catalog shows in the list and in its detail. For work that ends after the event,
   or for a request of the extension, the bean `CatalogFiles` of the catalog finds a file of its kinds
-  (`Instance<CatalogFiles>`, since the catalog may be absent), with the same `open()` and `record()`.
+  (`Instance<CatalogFiles>`, since the catalog may be absent), with the same `open()`, `link()` and
+  `record()`.
+- **Content without a copy** (EXT-107, `ext-catalog-api` 1.1.0). `event.file().link(validity)` gives a
+  signed, expiring link of the platform to the content (MK-093), for work that goes on outside the
+  event or the request of a person, such as a process that loads the file into a database or a tile
+  store: it downloads the content over HTTP, without a session, with ranges, at the address of the
+  installation (`mosaikit.public-url`) followed by `link.path()`, for at most
+  `mosaikit.files.link-max-validity` (7 days unless set). The link names the content the file has: it
+  stops working when the file is deleted or replaced, and the kind, told `REPLACED`, takes a new one.
+  So the extension keeps links, not copies, and a file counts once against the storage of the
+  organization. Made in a job, the link serves the content until it expires; made in a request of a
+  person, it carries their rights. A catalog older than 1.1.0 answers `UnsupportedOperationException`.
+
+```java
+public void changed(FileEvent event) {                     // in a job of the organization
+    switch (event.change()) {
+        case STORED, REPLACED, RECOGNIZED -> {
+            SignedLink link = event.file().link(Duration.ofHours(2));
+            loader.submit(event.file().id(), publicUrl + link.path()); // the loader reads it over HTTP
+            event.file().record(FileState.of("loading"));
+        }
+        case DELETED -> loader.drop(event.file().id());
+        default -> { }
+    }
+}
+```
 
 **In the frontend.** The extension contributes its icon, preview, states and actions to the point
 `catalog.file-kind` (version 1, whose JSON Schema is in [`manifest.yaml`](manifest.yaml)):
@@ -227,14 +253,24 @@ contributes:
 ```
 
 A file of the kind shows the icon, the title and the state in the list, with its actions; *Details*
-shows what it is, its state with its detail, the preview element and the actions. The preview and
+shows what it is, its state with its detail, the preview element and the actions.
+
+**Absent.** While the extension is not active in the organization (not installed, not able to run, or
+its apps turned off, MK-133), its files keep their kind and state (`fileKind.active` is `false` in the
+lists), and the list and *Details* show in place of the kind, its preview and its actions the
+placeholder of the platform (`mk-reference-placeholder`, MK-135): which kind is missing and, to
+administrators, which extension to install or turn on, as the kernel answers for the kind as a
+reference to its extension (`{extension, type: 'file-kind', id: <kind>}`). Download, move, rename,
+share, replace and delete work as on any other file (EXT-106). When the extension comes or goes, the
+open page shows its files again without a reload; the kind is told `RECOGNIZED` for its files when it
+comes back. The preview and
 each action are custom elements of the extension, which the catalog creates with the property
 `file`: `{ id, name, contentType, size, fileKind, url() }`, `url()` resolving to a signed, expiring
 link to its content (EXT-004). An action opens in a dialog; when it changed the file, it dispatches
 `catalog-file-changed` (bubbling, composed), and the catalog shows the file again.
 
 [`tests/fixtures/text-notes`](tests/fixtures/text-notes) is a complete example, which the tests
-install with the catalog.
+install with the catalog; its app lets the tests turn it off in the organization.
 
 ## Build and test
 

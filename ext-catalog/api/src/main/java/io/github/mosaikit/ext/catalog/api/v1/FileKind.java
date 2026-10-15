@@ -24,8 +24,9 @@ import dev.mosaikit.kernel.api.contract.ContractImplementation;
  * file when it is stored or replaced, and when an extension becomes active, for the files that no kind
  * recognized yet; the first kind that recognizes it, in the order of the extensions, is its kind. It
  * then tells that kind when the file changes ({@link #changed}), in a job of the organization. The
- * file stays a plain file of the catalog, with its content: without the extension, the catalog shows
- * it as any other file, and when the extension comes back its kind applies again.
+ * file stays a file of the catalog, with its content: without the extension, the catalog keeps its
+ * kind and state, shows in their place the placeholder of the platform for what is missing (EXT-106,
+ * MK-135), and works on it as on any other file; when the extension comes back its kind applies again.
  *
  * <p>The icon, the preview and the actions of a kind are contributions of the frontend of the extension
  * to the point {@code catalog.file-kind} of the catalog, naming the kind by {@link #name()}.
@@ -54,7 +55,8 @@ public interface FileKind extends ContractImplementation {
      * Something happened to a file of this kind. Called in a job of the organization, without a person,
      * a few seconds after the change (MK-085); at least once, so make it idempotent: an exception rolls
      * the work back and the catalog tells the kind again later, as the platform does with its events.
-     * The file reads its content with {@link CatalogFile#open()} and records a state with {@link
+     * The file reads its content with {@link CatalogFile#open()}, or gives a link to it for work that
+     * goes on later ({@link CatalogFile#link}), and records a state with {@link
      * CatalogFile#record(FileState)}.
      */
     default void changed(FileEvent event) {

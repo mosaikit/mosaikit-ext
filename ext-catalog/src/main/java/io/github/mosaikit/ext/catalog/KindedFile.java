@@ -4,9 +4,11 @@ package io.github.mosaikit.ext.catalog;
 
 import dev.mosaikit.kernel.api.files.FileContent;
 import dev.mosaikit.kernel.api.files.FileStorage;
+import dev.mosaikit.kernel.api.files.SignedLink;
 import io.github.mosaikit.ext.catalog.api.v1.CatalogFile;
 import io.github.mosaikit.ext.catalog.api.v1.FileState;
 import java.io.InputStream;
+import java.time.Duration;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -15,7 +17,8 @@ import java.util.UUID;
 /**
  * A file of the catalog as its kind sees it (EXT-105), backed by the item of the catalog: its content is
  * read through the file service of the kernel under the catalog (MK-041), which the extension of the kind
- * could not read under its own name.
+ * could not read under its own name, and so are the signed links to it (EXT-107), which name the content
+ * the file has now: replacing or deleting the file deletes that content, and its links answer 404.
  */
 final class KindedFile implements CatalogFile {
 
@@ -86,6 +89,15 @@ final class KindedFile implements CatalogFile {
     }
 
     @Override
+    public SignedLink link(Duration validFor) {
+        try {
+            return files.link(CatalogResource.EXTENSION, item.getFileId(), validFor);
+        } catch (NoSuchElementException e) {
+            throw new IllegalStateException("The content of " + item.getName() + " is gone", e);
+        }
+    }
+
+    @Override
     public void record(FileState state) {
         Item current = items.findById(item.getId()).orElse(null);
         if (current == null || !kind.equals(current.getFileKind())) {
@@ -113,6 +125,11 @@ final class KindedFile implements CatalogFile {
 
         @Override
         public InputStream open() {
+            throw new IllegalStateException("The file " + name + " was deleted: its content is gone");
+        }
+
+        @Override
+        public SignedLink link(Duration validFor) {
             throw new IllegalStateException("The file " + name + " was deleted: its content is gone");
         }
 

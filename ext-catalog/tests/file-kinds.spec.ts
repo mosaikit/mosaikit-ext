@@ -6,10 +6,15 @@ import { expect, test, type Page } from '@playwright/test';
 import { api, bench, member, restart, signIn, unique } from '@mosaikit/testing/playwright';
 import { API, download, fetchLink, fileOfType, folder, openFolder, share, type Folder, type Item } from './catalog.js';
 
+type Person = Parameters<typeof api>[0];
+
 // EXT-105: other extensions add kinds of files to the file manager through the contract file-kind of
 // the catalog. The fixture tests/fixtures/text-notes (org.example.textnotes) adds "text note": *.note,
 // text/x-note, or a text that starts with "NOTE:", with an icon, a preview, the states counted and empty,
 // and the action Count words.
+// EXT-106: while the fixture is turned off in the organization (its app off, MK-030) or removed, its files
+// keep their kind and show the placeholder of the platform (MK-135).
+// EXT-107: the fixture reads its notes again in its jobs through a signed link to their content.
 
 const NOTES = 'org.example.textnotes';
 const NOTES_API = '/api/v1/ext/text-notes';
@@ -30,6 +35,9 @@ interface Received {
   kind: string;
   details: Record<string, string>;
   content: string | null;
+  /** EXT-107: the signed link the kind got in its job, and what it read through it on its server. */
+  link: string | null;
+  linked: string | null;
 }
 
 /** The changes the kind of the fixture was told about a file, read on the server. */
@@ -249,7 +257,7 @@ test.describe('in Italian', () => {
   });
 });
 
-test('EXT-105 removing the extension of a kind leaves its files as plain files with their content, and installing it again recognizes them', async ({
+test('EXT-105 EXT-106 removing the extension of a kind leaves its files as files with their content, their kind kept behind the placeholder of the platform, and installing it again recognizes them', async ({
   page,
   browser,
 }) => {
@@ -269,8 +277,14 @@ test('EXT-105 removing the extension of a kind leaves its files as plain files w
   }
   await restart();
   try {
-    // A plain file now, with its content; one stored meanwhile is a plain file too.
-    expect((await listed(top.id, 'kept.note')).fileKind).toBeNull();
+    // A file with its content, its kind and state kept but not active; one stored meanwhile is a plain file.
+    expect((await listed(top.id, 'kept.note')).fileKind).toEqual({
+      extension: NOTES,
+      name: 'text-note',
+      state: 'counted',
+      stateDetail: '4 words',
+      active: false,
+    });
     const meanwhile = await fileOfType(member(), top.id, 'meanwhile.note', 'stored without the kind', 'text/plain');
     expect(meanwhile.fileKind).toBeNull();
     const { download: link } = await download(member(), [before.id]);
@@ -282,8 +296,14 @@ test('EXT-105 removing the extension of a kind leaves its files as plain files w
     await expect(row(page, 'kept.note').locator('img.kind')).toHaveCount(0);
     await expect(row(page, 'kept.note').getByText('Text note', { exact: true })).toHaveCount(0);
     await expect(row(page, 'kept.note').getByRole('button', { name: /^Count words/ })).toHaveCount(0);
+    // EXT-106: the shell no longer knows the contribution of the kind, so the placeholder names it.
+    await expect(row(page, 'kept.note').getByRole('note')).toContainText('Not available: text-note (kind of file)');
+    await expect(row(page, 'meanwhile.note').getByRole('note')).toHaveCount(0);
     await row(page, 'kept.note').getByRole('button', { name: 'Details of kept.note' }).click();
-    await expect(detail(page).getByRole('definition').filter({ hasText: /^File$/ })).toBeVisible();
+    await expect(detail(page).getByRole('note')).toContainText(
+      'The extension that provides it is not active in this organization.',
+    );
+    await expect(detail(page).getByRole('definition').filter({ hasText: /^text-note$/ })).toBeVisible();
   } finally {
     // Installed again: whatever happened, the other tests find the fixture.
     for (const name of fixture) {
@@ -300,7 +320,9 @@ test('EXT-105 removing the extension of a kind leaves its files as plain files w
   expect((await toldOf(meanwhile.id, 'RECOGNIZED')).content).toBe('stored without the kind');
   expect((await toldOf(before.id, 'RECOGNIZED')).content).toBe('kept with its content');
   await stateOf(top.id, 'meanwhile.note', 'counted');
-  expect((await listed(top.id, 'kept.note')).fileKind).toEqual(expect.objectContaining({ extension: NOTES, state: 'counted' }));
+  expect((await listed(top.id, 'kept.note')).fileKind).toEqual(
+    expect.objectContaining({ extension: NOTES, state: 'counted', active: true }),
+  );
 
   // A new page of the shell, which reads the extensions active now.
   const again = await browser.newPage();
@@ -309,4 +331,165 @@ test('EXT-105 removing the extension of a kind leaves its files as plain files w
   await expect(row(again, 'meanwhile.note').getByText('Text note', { exact: true })).toBeVisible();
   await expect(row(again, 'kept.note').getByRole('button', { name: 'Count words: kept.note' })).toBeVisible();
   await again.close();
+});
+
+const APPS = () => `/api/v1/organizations/${bench().organization.slug}/apps`;
+const MEMBERS = (person: Person) => `/api/v1/organizations/${bench().organization.slug}/members/${person.user}`;
+
+/** Turns the app of the fixture off in the organization, which turns the extension off there, or back on. */
+async function textNotes(on: boolean): Promise<void> {
+  const changed = await api(bench().admin, APPS(), {
+    method: 'PUT',
+    body: JSON.stringify(
+      on ? [] : [{ extensionId: NOTES, appId: 'notes', enabled: false, pinned: false, roles: [] }],
+    ),
+  });
+  expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+}
+
+test.describe('a kind whose extension is turned off', () => {
+  test.beforeAll(async () => {
+    // The colleague administers the organization: the placeholder tells them what to turn on.
+    const promoted = await api(bench().admin, MEMBERS(member(1)), {
+      method: 'PUT',
+      body: JSON.stringify({ roles: ['organization-admin', 'organization-user'] }),
+    });
+    expect(promoted.status, JSON.stringify(promoted.body)).toBe(200);
+  });
+
+  test.afterAll(async () => {
+    await textNotes(true);
+    await api(bench().admin, MEMBERS(member(1)), {
+      method: 'PUT',
+      body: JSON.stringify({ roles: ['organization-user'] }),
+    });
+  });
+
+  test('EXT-106 a file of a kind whose extension is turned off shows the placeholder of the platform in the list and in its detail, keeps its kind and state, works as a file, and shows its kind again without a reload', async ({
+    page,
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const top = await folder(member(), unique('Absent'));
+    await share(member(), top, { kind: 'person', email: member(1).user }, 'edit');
+    const sub = await folder(member(), 'Inner', top.id);
+    const note = await fileOfType(member(), top.id, 'plan.note', 'one two three', 'text/plain');
+    const other = await fileOfType(member(), top.id, 'other.note', 'four five', 'text/plain');
+    await stateOf(top.id, 'plan.note', 'counted');
+    await stateOf(top.id, 'other.note', 'counted');
+
+    // Both pages show the kind while its extension is active.
+    await signIn(page, member());
+    await openFolder(page, top.id);
+    await expect(row(page, 'plan.note').getByText('Text note', { exact: true })).toBeVisible();
+    await row(page, 'plan.note').getByRole('button', { name: 'Details of plan.note' }).click();
+    await expect(detail(page).getByRole('region', { name: 'Preview of plan.note' })).toContainText('one two three');
+    const admin = await (await browser.newContext()).newPage();
+    await signIn(admin, member(1));
+    await openFolder(admin, top.id);
+    await expect(row(admin, 'plan.note').getByText('Text note', { exact: true })).toBeVisible();
+
+    // Turned off: the open pages show the placeholder in place of the kind, its state and its actions;
+    // only the administrator reads what to turn on.
+    await textNotes(false);
+    const placeholder = row(page, 'plan.note').getByRole('note');
+    await expect(placeholder).toContainText('Not available: Text note (kind of file)');
+    await expect(placeholder).toContainText('The extension that provides it is not active in this organization.');
+    await expect(placeholder).not.toContainText('Turn on');
+    await expect(row(page, 'plan.note').getByText('Text note', { exact: true })).toHaveCount(0);
+    await expect(row(page, 'plan.note').getByRole('button', { name: /^Count words/ })).toHaveCount(0);
+    await expect(row(page, 'plan.note').locator('img.kind')).toHaveCount(0);
+    await expect(row(admin, 'plan.note').getByRole('note')).toContainText(
+      'Turn on the extension Text notes (fixture) (org.example.textnotes) in the apps of the organization.',
+    );
+    // The detail too: the placeholder, the kind and the state it keeps, no preview and no actions.
+    await expect(detail(page).getByRole('note')).toContainText('Not available: Text note (kind of file)');
+    await expect(detail(page).getByRole('definition').filter({ hasText: /^Text note$/ })).toBeVisible();
+    await expect(detail(page).getByRole('definition').filter({ hasText: 'Counted: 3 words' })).toBeVisible();
+    await expect(detail(page).getByRole('region', { name: /^Preview of/ })).toHaveCount(0);
+    await expect(detail(page).getByRole('group', { name: /^Actions on/ })).toBeHidden();
+    await expect(detail(page).getByRole('button', { name: 'Replace content' })).toBeVisible();
+
+    // The file works as any other: renamed in the app, downloaded, moved, shared and deleted.
+    await row(page, 'plan.note').getByRole('checkbox').check();
+    await app(page).getByRole('button', { name: 'Rename' }).click();
+    await dialog(page).getByRole('textbox').fill('renamed.note');
+    await dialog(page).getByRole('button', { name: 'Rename' }).click();
+    await expect(row(page, 'renamed.note')).toBeVisible();
+    await expect(row(page, 'renamed.note').getByRole('note')).toContainText('Not available: Text note (kind of file)');
+    const { download: link } = await download(member(), [note.id]);
+    expect((await fetchLink(link.entries[0]!.url!)).text).toBe('one two three');
+    const moved = await api(member(), `${API}/items/${note.id}/move`, { method: 'POST', body: JSON.stringify({ parent: sub.id }) });
+    expect(moved.status, JSON.stringify(moved.body)).toBe(204);
+    const back = await api(member(), `${API}/items/${note.id}/move`, { method: 'POST', body: JSON.stringify({ parent: top.id }) });
+    expect(back.status, JSON.stringify(back.body)).toBe(204);
+    await share(member(), { ...note, kind: 'file' } as Item, { kind: 'organization' }, 'read');
+    expect((await api(member(), `${API}/items/${other.id}`, { method: 'DELETE' })).status).toBe(204);
+    expect((await download(member(), [other.id])).status).toBe(404);
+
+    // Through all of it, the file kept its kind and the state its kind recorded.
+    expect((await listed(top.id, 'renamed.note')).fileKind).toEqual({
+      extension: NOTES,
+      name: 'text-note',
+      state: 'counted',
+      stateDetail: '3 words',
+      active: false,
+    });
+
+    // Back on: the same pages show the kind again, with its state, actions and preview, without a reload.
+    await textNotes(true);
+    await expect(row(page, 'renamed.note').getByText('Text note', { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(row(page, 'renamed.note').getByRole('note')).toHaveCount(0);
+    await expect(row(page, 'renamed.note').getByRole('button', { name: 'Count words: renamed.note' })).toBeVisible();
+    await row(page, 'renamed.note').getByRole('button', { name: 'Details of renamed.note' }).click();
+    await expect(detail(page).getByRole('region', { name: 'Preview of renamed.note' })).toContainText('one two three');
+    await expect(detail(page).getByRole('note')).toHaveCount(0);
+    await expect(row(admin, 'renamed.note').getByText('Text note', { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(row(admin, 'renamed.note').getByRole('note')).toHaveCount(0);
+    // The kind sees its file again when its extension becomes active, and finds it as it is.
+    expect((await toldOf(note.id, 'RECOGNIZED')).name).toBe('renamed.note');
+    expect((await listed(top.id, 'renamed.note')).fileKind).toEqual(expect.objectContaining({ active: true, state: 'counted' }));
+    await admin.close();
+  });
+});
+
+test('EXT-107 the kind gets in its job a signed link to the content of its file, reads it on its server without a session and keeps no copy, so the file counts once against the storage', async () => {
+  const before = (await api(member(), `${NOTES_API}/storage`)).body as { used: number };
+  const top = await folder(member(), unique('Linked'));
+  const text = 'read through a signed link, never copied';
+  const note = await fileOfType(member(), top.id, 'linked.note', text, 'text/plain');
+
+  // In its job, outside the request of the person, the kind made a link and read the note through it.
+  const stored = await toldOf(note.id, 'STORED');
+  expect(stored.link).toMatch(/^\//);
+  expect(stored.linked).toBe(text);
+  // Whoever holds the link reads the content, without a session, until it expires.
+  expect(await fetchLink(stored.link!)).toEqual({ status: 200, text });
+
+  // The storage of the organization grew by the note once: the kind keeps the link, not a copy.
+  const after = (await api(member(), `${NOTES_API}/storage`)).body as { used: number };
+  expect(after.used - before.used).toBe(Buffer.byteLength(text));
+});
+
+test('EXT-107 a link to the content stops working when the file is replaced or deleted, and a new link serves the new content', async () => {
+  const top = await folder(member(), unique('Relinked'));
+  const note = await fileOfType(member(), top.id, 'changing.note', 'the first words', 'text/plain');
+  const first = (await toldOf(note.id, 'STORED')).link!;
+  expect((await fetchLink(first)).text).toBe('the first words');
+
+  const replaced = await api(member(), `${API}/items/${note.id}/content`, {
+    method: 'PUT',
+    headers: { 'content-type': 'text/plain' },
+    body: 'NOTE: the second words',
+  });
+  expect(replaced.status, JSON.stringify(replaced.body)).toBe(204);
+  const second = await toldOf(note.id, 'REPLACED');
+  expect(second.linked).toBe('NOTE: the second words');
+  expect(second.link).not.toBe(first);
+  expect((await fetchLink(first)).status).toBe(404);
+  expect(await fetchLink(second.link!)).toEqual({ status: 200, text: 'NOTE: the second words' });
+
+  expect((await api(member(), `${API}/items/${note.id}`, { method: 'DELETE' })).status).toBe(204);
+  await toldOf(note.id, 'DELETED');
+  expect((await fetchLink(second.link!)).status).toBe(404);
 });

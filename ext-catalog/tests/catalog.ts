@@ -20,9 +20,18 @@ export interface Item {
   changed: string;
   sharing: { scope: string; inherited: boolean };
   level: string;
-  /** EXT-105: the media type of a file, and its kind while the extension of the kind is active. */
+  /**
+   * EXT-105: the media type of a file, and its kind; EXT-106: also while the extension of the kind is
+   * absent, then not active.
+   */
   contentType: string | null;
-  fileKind: { extension: string; name: string; state: string | null; stateDetail: string | null } | null;
+  fileKind: {
+    extension: string;
+    name: string;
+    state: string | null;
+    stateDetail: string | null;
+    active: boolean;
+  } | null;
 }
 
 export interface Folder {

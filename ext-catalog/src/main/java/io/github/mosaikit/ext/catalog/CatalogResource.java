@@ -70,8 +70,8 @@ public class CatalogResource {
      * @param sharing who reaches it besides its owner and the administrators
      * @param level the level of the person on it: read, edit or manage
      * @param contentType the media type of a file, {@code null} for a folder
-     * @param fileKind the kind of a file that another extension recognized, while that extension is
-     *     active in the organization (EXT-105); {@code null} otherwise
+     * @param fileKind the kind of a file that another extension recognized (EXT-105), also while that
+     *     extension is absent from the organization (EXT-106); {@code null} for a plain file or a folder
      */
     public record ItemView(
             UUID id,
@@ -89,17 +89,25 @@ public class CatalogResource {
     /**
      * The kind of a file (EXT-105): the extension that recognized it, the name of the kind in it, and the
      * state the kind recorded on the file, with its detail.
+     *
+     * @param active whether the kind is there: its extension is active in the organization and still has
+     *     it. While it is not, the file keeps its kind and its state, and the app shows the placeholder of
+     *     the platform for what is missing (EXT-106, MK-135)
      */
-    public record FileKindView(String extension, String name, String state, String stateDetail) {
+    public record FileKindView(String extension, String name, String state, String stateDetail, boolean active) {
 
         static FileKindView of(Item item, Set<String> active) {
             String kind = item.getFileKind();
-            if (kind == null || !active.contains(kind)) {
+            if (kind == null || item.isFolder()) {
                 return null;
             }
             String extension = FileKinds.extensionOf(kind);
             return new FileKindView(
-                    extension, kind.substring(extension.length() + 1), item.getKindState(), item.getKindStateDetail());
+                    extension,
+                    kind.substring(extension.length() + 1),
+                    item.getKindState(),
+                    item.getKindStateDetail(),
+                    active.contains(kind));
         }
     }
 
