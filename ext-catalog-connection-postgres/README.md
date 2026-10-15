@@ -62,12 +62,15 @@ framework.
 Maven needs, in the local repository, the parent of Mosaikit extensions (see the README of
 `ext-catalog-connection` or of Mosaikit), the API of the connectors
 `io.github.mosaikit.ext:ext-catalog-connection-api` and the package of the framework
-`io.github.mosaikit.ext:ext-catalog-connection` of type `zip`, which the tests install. Until the
-framework is released, put them there from a build of `ext-catalog-connection`:
+`io.github.mosaikit.ext:ext-catalog-connection` of type `zip`, which the tests install: the connector
+`requires` it (manifest.yaml). Until the framework is released, put them there from a build of
+`ext-catalog-connection` (its folder, or its repository) before building the connector; the CI does
+the same:
 
 ```bash
 # in ext-catalog-connection
-mvn -f api/pom.xml install && mvn package
+mvn -f api/pom.xml install
+mvn package -DskipTests -Dinvoker.skip
 mvn install:install-file -Dfile=target/ext-catalog-connection-0.1.0.zip \
   -DgroupId=io.github.mosaikit.ext -DartifactId=ext-catalog-connection -Dversion=0.1.0 -Dpackaging=zip
 ```
