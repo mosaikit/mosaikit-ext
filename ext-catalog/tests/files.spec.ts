@@ -327,8 +327,8 @@ test('EXT-002 deleting a folder asks for confirmation with the number of items i
   await expect(status(page)).toHaveText('Temporary deleted.');
   await expect(tree(page).getByRole('link', { name: 'Temporary', exact: true })).toHaveCount(0);
 
-  // A colleague who edits the folder deletes a file of the member: its content leaves the storage too,
-  // in a job, since the file service of the kernel only knows the share of the folder.
+  // A colleague who edits the folder deletes a file of the member: its content leaves the storage at
+  // once too, since the file service of the kernel knows the share of the folder (MK-136).
   const shared = await folder(member(), 'Shared', top.id);
   const theirs = await file(member(), shared.id, 'theirs.txt', 'theirs');
   const link = (await download(member(), [theirs.id])).download.entries[0]!.url!;
@@ -336,7 +336,7 @@ test('EXT-002 deleting a folder asks for confirmation with the number of items i
   const removed = await api(member(1), `${API}/items/${theirs.id}`, { method: 'DELETE' });
   expect(removed.status).toBe(204);
   expect(await namesIn(shared.id)).toEqual([]);
-  await expect.poll(async () => (await fetchLink(link)).status, { timeout: 30_000 }).toBe(404);
+  expect((await fetchLink(link)).status).toBe(404);
 });
 
 test('EXT-002 a file is downloaded with its name, and several selected items are downloaded as one archive', async ({
@@ -384,7 +384,7 @@ test('EXT-002 a file is downloaded with its name, and several selected items are
   // The colleague, who reads the folder through its share only, downloads its files too.
   await share(member(), album, { kind: 'person', email: member(1).user });
   const { download: theirs } = await download(member(1), [album.id]);
-  expect(theirs).toMatchObject({ kind: 'archive', name: 'Album.zip', status: 'ready' });
+  expect(theirs).toMatchObject({ kind: 'archive', name: 'Album.zip' });
   expect(theirs.entries.map((entry) => entry.path)).toEqual([
     'Album/',
     'Album/Deeper/',

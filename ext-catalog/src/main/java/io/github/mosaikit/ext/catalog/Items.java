@@ -35,10 +35,6 @@ public interface Items {
     @Query("select i.parentId from Item i where i.parentId in :parents")
     List<UUID> parentsOfChildren(Collection<UUID> parents);
 
-    /** Every item of the organization. */
-    @Query("from Item i")
-    List<Item> all();
-
     /** Every file of the organization (EXT-105). */
     @Query("from Item i where i.kind = 'file'")
     List<Item> files();
@@ -51,8 +47,4 @@ public interface Items {
 
     @Delete
     void delete(Item item);
-
-    /** Deletes every item of the organization, in one statement, so that parents may go before children. */
-    @Query("delete from Item")
-    void deleteAll();
 }

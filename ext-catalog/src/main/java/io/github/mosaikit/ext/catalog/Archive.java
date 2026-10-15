@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: MPL-2.0
 package io.github.mosaikit.ext.catalog;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -26,17 +23,8 @@ public final class Archive {
      * @param path its path in the archive, the name alone for a file selected on its own
      * @param item the file in the catalog, {@code null} for a folder
      * @param file the content in the file service of the kernel, {@code null} for a folder
-     * @param url its signed link once made, relative to the root of the kernel (MK-093)
      */
-    public record Entry(String path, UUID item, UUID file, String url) {
-
-        /** The same entry with its signed link. */
-        public Entry signed(String link) {
-            return new Entry(path, item, file, link);
-        }
-    }
-
-    private static final TypeReference<List<Entry>> ENTRIES = new TypeReference<>() {};
+    public record Entry(String path, UUID item, UUID file) {}
 
     private Archive() {}
 
@@ -57,10 +45,10 @@ public final class Archive {
 
     private static void add(List<Entry> entries, String path, Item item, Function<Item, List<Item>> children) {
         if (!item.isFolder()) {
-            entries.add(new Entry(path, item.getId(), item.getFileId(), null));
+            entries.add(new Entry(path, item.getId(), item.getFileId()));
             return;
         }
-        entries.add(new Entry(path + "/", null, null, null));
+        entries.add(new Entry(path + "/", null, null));
         for (Item child : children.apply(item)) {
             add(entries, path + "/" + child.getName(), child, children);
         }
@@ -75,23 +63,5 @@ public final class Archive {
             candidate = stem + " (" + n + ")" + extension;
         }
         return candidate;
-    }
-
-    /** The entries as the JSON of the table {@code download}. */
-    static String json(ObjectMapper mapper, List<Entry> entries) {
-        try {
-            return mapper.writeValueAsString(entries);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Cannot write the entries of a download", e);
-        }
-    }
-
-    /** The entries read from the JSON of the table {@code download}. */
-    static List<Entry> read(ObjectMapper mapper, String json) {
-        try {
-            return mapper.readValue(json, ENTRIES);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Cannot read the entries of a download", e);
-        }
     }
 }

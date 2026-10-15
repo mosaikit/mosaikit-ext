@@ -21,8 +21,9 @@ import java.util.UUID;
 /**
  * Who has access to a folder or a file, and through which share (EXT-003), at
  * {@code /api/v1/ext/catalog/items/{id}/access}. Sharing itself happens in the sharing dialog of the
- * kernel (MK-055); this answer adds what the kernel does not know: the access that comes from the
- * folders above.
+ * kernel (MK-055), which also lists, to who may share the item, the accesses that come from the
+ * folders above (MK-136); this answer shows them to everyone who reads the item, naming only the
+ * folders above that they read.
  */
 @Path("/api/v1/ext/catalog/items")
 @Produces(MediaType.APPLICATION_JSON)

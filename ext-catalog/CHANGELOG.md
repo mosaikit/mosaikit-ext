@@ -6,6 +6,25 @@ and the versions [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Folders and files declare `inherits: parent` (MK-136): the kernel answers the level of a person
+  with the folders above, and the catalog asks it instead of walking the folders itself. A person
+  with `manage` on a folder shares what it holds in the dialog of the platform, and the grants of the
+  folders above in who has access are those of the kernel (EXT-003, #22).
+- Downloads and deletes happen in the request (EXT-002, EXT-004): `POST downloads` always answers
+  `200` with the signed links, made for the person also when they reach a file through a folder;
+  the answer no longer has `id` and `status`, and `GET downloads/{id}` is removed with the `202` and
+  the job that made the links. Deleting a file deletes its content as the person, before its
+  resource; the job that deleted it later is removed. Schema `V4` drops `download` and
+  `pending_removal`.
+- `PUT items/{id}/content` and `CatalogFile.open` work for a person who edits or reads the file
+  through a folder above it (EXT-105, MK-136): the content replaced is deleted as the person in the
+  request, and the job `content.discarded` is removed.
+- On `organization.deleted` the catalog no longer deletes the content of the files, its folders and
+  files: it has nothing outside the kernel to release, and the kernel removes them after the
+  retention of the installation, so that the deletion can be undone until then (EXT-004, MK-130).
+
 ### Added
 
 - Kinds of files added by other extensions (EXT-105), through the contract
@@ -39,10 +58,8 @@ and the versions [Semantic Versioning](https://semver.org/).
 - Storage through the file service of the platform (EXT-004): the content of files is kept only by
   the file service of the kernel (a directory in the portable distribution, an S3-compatible bucket on
   a server) and downloaded only through its signed, expiring links; deleting a file deletes its
-  content, and the event of an organization deleted deletes the content of all its files. Links and
-  deletes that the kernel refuses to a person who reaches a file only through a folder are made by a
-  job of the organization after the check of the extension. Schema `V2`: `download`,
-  `pending_removal`.
+  content. Deleting the organization leaves its folders, files and content to the kernel, which
+  removes them from the database and the store after its retention (MK-130).
 - Folders and sub-folders of an organization (EXT-001): a Java backend with the schema `ext_catalog`,
   where folders and files are items registered with the kernel as resources of the types `folder`
   and `file` (levels read, edit, manage); a level on a folder counts on what it holds. The app shows

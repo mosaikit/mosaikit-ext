@@ -94,15 +94,13 @@ export async function openFolder(page: Page, id: string | null): Promise<void> {
 // EXT-002, EXT-004: downloads, uploads dropped from the computer, archives.
 
 export interface Download {
-  id: string | null;
   kind: 'file' | 'archive';
   name: string;
-  status: 'pending' | 'ready' | 'failed';
-  expires: string | null;
+  expires: string;
   entries: { path: string; url: string | null }[];
 }
 
-/** Asks for a download of items and waits until its signed links are made. */
+/** Asks for a download of items, with the signed links of its files. */
 export async function download(
   person: Person,
   items: string[],
@@ -112,19 +110,7 @@ export async function download(
     method: 'POST',
     body: JSON.stringify({ items, ...options }),
   });
-  let current = body as Download;
-  if (status === 202) {
-    await expect
-      .poll(
-        async () => {
-          current = (await api(person, `${API}/downloads/${current.id}`)).body as Download;
-          return current.status;
-        },
-        { timeout: 30_000 },
-      )
-      .not.toBe('pending');
-  }
-  return { status, download: current };
+  return { status, download: body as Download };
 }
 
 /** Fetches a signed link without any session, as anyone who holds it does. */

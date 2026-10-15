@@ -13,8 +13,9 @@ import java.util.function.Function;
 /**
  * Who has access to a folder or a file, and through which share (EXT-003): its owner and its own
  * grants, then the owner and the grants of each folder above it that the person reads, from the
- * nearest one upwards, since a level on a folder counts on everything it holds. The administrators of
- * the organization reach everything and are not listed.
+ * nearest one upwards, since a level on a folder counts on everything it holds. The kernel answers the
+ * level and the grants that come from above (MK-136); the folders the person does not read are not
+ * named. The administrators of the organization reach everything and are not listed.
  *
  * @param level the level of the person on the item
  * @param canShare whether the person may share it in the sharing dialog of the kernel (MK-055)
@@ -64,9 +65,17 @@ public record Access(UUID id, String kind, String name, String level, boolean ca
      */
     static Access of(Tree tree, Item item, Function<Item, UUID> owner, Names names) {
         List<Entry> entries = new ArrayList<>();
-        add(entries, tree, item, null, owner, names);
-        for (Item folder : tree.readableAncestors(item)) {
-            add(entries, tree, folder, new CatalogResource.Step(folder.getId(), folder.getName()), owner, names);
+        add(entries, tree.grants(item), item, null, owner, names);
+        List<Grant> inherited = tree.inheritedGrants(item);
+        List<Item> above = item.getParentId() == null
+                ? List.of()
+                : tree.readableFolder(item.getParentId()).map(tree::path).orElse(List.of());
+        for (Item folder : above.reversed()) {
+            String id = folder.getId().toString();
+            List<Grant> carried = inherited.stream()
+                    .filter(grant -> grant.resource().id().equals(id))
+                    .toList();
+            add(entries, carried, folder, new CatalogResource.Step(folder.getId(), folder.getName()), owner, names);
         }
         return new Access(
                 item.getId(),
@@ -79,7 +88,7 @@ public record Access(UUID id, String kind, String name, String level, boolean ca
 
     private static void add(
             List<Entry> entries,
-            Tree tree,
+            List<Grant> grants,
             Item item,
             CatalogResource.Step from,
             Function<Item, UUID> owner,
@@ -88,7 +97,7 @@ public record Access(UUID id, String kind, String name, String level, boolean ca
         if (account != null) {
             entries.add(new Entry(names.person(account), Levels.ORDER.getLast(), OWNER, from));
         }
-        for (Grant grant : tree.grants(item)) {
+        for (Grant grant : grants) {
             entries.add(new Entry(who(grant, names), grant.level(), GRANT, from));
         }
     }

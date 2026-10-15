@@ -13,7 +13,7 @@ one `EXT-nnn.md` each, and its changes in [`CHANGELOG.md`](CHANGELOG.md).
 |---|---|
 | `manifest.yaml` | identity, backend, schema, resource types, frontend and contributions of the extension |
 | `src/main/java/` | the backend: the REST API under `/api/v1/ext/catalog` and the tree of folders and files |
-| `db/` | the migrations of the schema `ext_catalog`: the tree (`V1`), downloads and pending removals (`V2`), kinds of files (`V3`) |
+| `db/` | the migrations of the schema `ext_catalog`: the tree (`V1`), kinds of files (`V3`); `V2` kept downloads and pending removals for jobs, which `V4` drops |
 | `api/` | `io.github.mosaikit.ext:ext-catalog-api`, the contracts that other extensions implement (EXT-105): a library of the catalog and of those extensions |
 | `web/index.js` | the app, a custom element the shell renders at `/app/catalog`; `web/drop.js` reads what is dropped or chosen, `web/zip.js` writes the archive of a download |
 | `web/i18n.js` | the texts of the app in English and Italian, chosen by `context.locale` |
@@ -52,9 +52,8 @@ does not exist.
 | `POST /api/v1/ext/catalog/items/{id}/move` | `{ "parent" }`, a folder where the person has the level edit, or `null` for the root; the item keeps its identifier and its own shares; `409` for a name taken there, or a folder moved into itself |
 | `GET /api/v1/ext/catalog/items/{id}/summary` | `{ "items", "bytes" }`: what a folder holds at any depth, for the confirmation of a delete |
 | `DELETE /api/v1/ext/catalog/items/{id}` | deletes the item and everything it holds, with the level edit, from the catalog and from the file service |
-| `POST /api/v1/ext/catalog/downloads` | `{ "items", "name"?, "validFor"? }`: one file, or the entries of an archive (`path`, and `url` for a file), each with a signed link of the kernel valid `validFor` seconds (300 unless given, at most 3600); `200` when ready, `202` while a job makes the links |
-| `GET /api/v1/ext/catalog/downloads/{id}` | a download of the person, `pending` until its links are made, then `ready` |
-| `PUT /api/v1/ext/catalog/items/{id}/content` | replaces the content of a file with the body and its `Content-Type`, with the level edit on the file itself; the file keeps its identifier, name, folder and shares |
+| `POST /api/v1/ext/catalog/downloads` | `{ "items", "name"?, "validFor"? }`: one file, or the entries of an archive (`path`, and `url` for a file), each with a signed link of the kernel made for the person, valid `validFor` seconds (300 unless given, at most 3600), and `expires` |
+| `PUT /api/v1/ext/catalog/items/{id}/content` | replaces the content of a file with the body and its `Content-Type`, with the level edit, also through a folder above it (MK-136); the file keeps its identifier, name, folder and shares |
 
 A file in a list also has its `contentType` and `fileKind`: `{ "extension", "name", "state",
 "stateDetail" }` when an extension active in the organization recognized it (EXT-105), `null`
@@ -102,26 +101,27 @@ kernel serves both stores through the same `FileStorage`, which is all the exten
 
 A file is downloaded only through a signed, expiring link of the kernel (MK-093), which the app
 fetches without the session of the person; an expired or altered link answers 404. The archive of
-several items is written by the app from the links of their files. A file deleted from the catalog
-leaves the store, and when the organization is deleted the extension deletes the content of all its
-files (on the event `organization.deleted`, which the kernel raises once it can delete organizations,
-MK-130).
+several items is written by the app from the links of their files. The kernel makes the links, and
+deletes a content, for the person in the request, also when they reach the file only through a folder
+above it (MK-136); a link carries their rights, so revoking their share stops it at its next use. A
+file deleted from the catalog leaves the store in the same transaction, its content before its
+resource, so that a content is never left without the sharing that protects it.
 
-The kernel does not know yet that a level on a folder counts on what it holds: it makes a link, or
-deletes a content, for a person only when they hold a level on the file itself (its owner, a person
-the file is shared with, an administrator). For a person who reaches a file only through a folder,
-the extension checks them itself and asks a job of the organization (an event of its own, MK-085) to
-make the links, or to delete the content, without a person: a download answers `202` and is ready a
-few seconds later, and the content of a file they deleted leaves the store a few seconds after it
-left the catalog, its resource staying registered until then.
+When a platform administrator deletes the organization (MK-130), its people lose access at once and
+its signed links answer not found; the extension, told by the event `organization.deleted`, has
+nothing outside the kernel to release and destroys nothing. The kernel keeps the rows of the catalog and the content of
+its files for the retention of the installation (`mosaikit.organizations.removal-retention`, so that
+the deletion can be undone), then removes the rows of `ext_catalog`, which all carry
+`organization_id`, and the files from the store.
 
 ## Sharing
 
 A folder or a file is shared in the sharing dialog of the platform (MK-055), with a person, a group,
 the whole organization or a link, at the levels `read`, `edit` and `manage`; the app opens it with
 the Share button of who has access. A share on a folder counts on everything the folder holds, at any
-depth, also on what is added to it later: the catalog adds this inheritance to the kernel at every
-request, so a share that is removed stops counting at the next request of the person.
+depth, also on what is added to it later: the types `folder` and `file` declare `inherits: parent`
+(MK-136), so the kernel answers every level with the folders above, and a share that is removed
+stops counting at the next request of the person.
 
 Next to the files of the organization each person has **Shared with me**
 (`/app/catalog?view=shared`): the folders and files that someone else shared with them, a group of
@@ -133,13 +133,11 @@ app shows **who has access** and through which share: the owner and the grants o
 then those of each folder above it that the person reads, with the folder they come from. The
 administrators of the organization reach everything and are not listed.
 
-The kernel does not know that a share on a folder covers its content (MK-055, "no inheritance from
-the parent, for now"). What the catalog answers follows the folders; what the kernel answers on an
-item reached only through a folder above does not, until the platform passes grants from a parent
-resource to its children: the sharing dialog lets a person share an item only with a level on the
-item itself (`canShare`), and the file service, its signed links and search refuse a file to a person
-who reaches it only through its folder. The catalog works around it for downloads and deletes, with a
-job of the organization after its own check (see Storage); search still refuses such a file.
+Since the kernel passes the levels of a folder to what it holds, the catalog, the sharing dialog, the
+file service and its signed links agree: a person with `manage` on a folder shares what it
+holds (`canShare`), and one who reads a folder reads and downloads its files. The grants that come
+from the folders above are the kernel's (`Sharing.inheritedGrants`); who has access names only the
+folders above that the person reads.
 
 The dialog also makes links, which the access lists with their expiry; the catalog does not yet
 contribute the page that shows a folder or a file opened through a link (`shared.view`).

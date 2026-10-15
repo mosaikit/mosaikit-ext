@@ -20,9 +20,10 @@ import java.util.function.Predicate;
 
 /**
  * The tree of the organization as the person of one request sees it (EXT-001). The kernel keeps the
- * grants of each item (MK-055) and does not pass them from a folder to what it holds; the catalog
- * does: the level of the person on an item is the highest of their levels on it and on the folders
- * above it. One instance serves one request and remembers what it asked the kernel.
+ * grants of each item (MK-055) and, since folders and files declare {@code inherits: parent}
+ * (MK-136), answers the level of the person on an item with those of the folders above it: the
+ * catalog asks it and walks no folder for levels. One instance serves one request and remembers what
+ * it asked the kernel.
  */
 final class Tree {
 
@@ -30,8 +31,8 @@ final class Tree {
     private final Sharing sharing;
     private final Map<UUID, Optional<Item>> loaded = new HashMap<>();
     private final Map<UUID, Optional<String>> levels = new HashMap<>();
-    private final Map<UUID, Optional<String>> ownLevels = new HashMap<>();
     private final Map<UUID, List<Grant>> grants = new HashMap<>();
+    private final Map<UUID, List<Grant>> inheritedGrants = new HashMap<>();
     private final Map<UUID, String> scopes = new HashMap<>();
     private final Map<UUID, String> scopesAbove = new HashMap<>();
 
@@ -59,39 +60,21 @@ final class Tree {
         return item(id).filter(Item::isFolder).filter(folder -> level(folder) != null);
     }
 
-    /** The level of the person on an item, or {@code null} when they cannot read it. */
-    String level(Item item) {
-        Optional<String> known = levels.get(item.getId());
-        if (known != null) {
-            return known.orElse(null);
-        }
-        String own = ownLevel(item);
-        String above = item.getParentId() == null
-                ? null
-                : item(item.getParentId()).map(this::level).orElse(null);
-        String level = Levels.highest(own, above);
-        levels.put(item.getId(), Optional.ofNullable(level));
-        return level;
-    }
-
     /**
-     * The level of the person on the item itself, as the kernel answers it, without the folders above:
-     * the one with which the kernel lets them share it, read its content in the file service or make
-     * signed links to it (MK-055).
+     * The level of the person on an item, or {@code null} when they cannot read it: the highest of
+     * their levels on it and on the folders above it, as the kernel answers it (MK-136).
      */
-    String ownLevel(Item item) {
-        return ownLevels
-                .computeIfAbsent(item.getId(), _ -> sharing.level(ref(item)))
-                .orElse(null);
+    String level(Item item) {
+        return levels.computeIfAbsent(item.getId(), _ -> sharing.level(ref(item))).orElse(null);
     }
 
     /**
      * Whether the person may share the item in the sharing dialog of the kernel: they hold its highest
-     * level on the item itself, as its owner, an administrator or through a grant (MK-055). A level
-     * that reaches them only through a folder above does not count, as the kernel does not know it.
+     * level, as its owner, an administrator, or through a grant on it or on a folder above it (MK-055,
+     * MK-136).
      */
     boolean canShare(Item item) {
-        return Levels.ORDER.getLast().equals(ownLevel(item));
+        return Levels.ORDER.getLast().equals(level(item));
     }
 
     /** The grants of the item itself, links included, as the kernel keeps them. */
@@ -100,18 +83,11 @@ final class Tree {
     }
 
     /**
-     * The folders above an item that the person reads, from its parent upwards: those whose grants
-     * reach the item. A person who reads a folder reads everything in it, so they stop at the first
-     * one the person cannot read.
+     * The grants of the folders above the item that reach it, from its parent upwards, each naming the
+     * folder that carries it in {@link Grant#resource()}, as the kernel answers them (MK-136).
      */
-    List<Item> readableAncestors(Item item) {
-        List<Item> above = new ArrayList<>();
-        Item step = item.getParentId() == null ? null : item(item.getParentId()).orElse(null);
-        while (step != null && level(step) != null) {
-            above.add(step);
-            step = step.getParentId() == null ? null : item(step.getParentId()).orElse(null);
-        }
-        return above;
+    List<Grant> inheritedGrants(Item item) {
+        return inheritedGrants.computeIfAbsent(item.getId(), _ -> sharing.inheritedGrants(ref(item)));
     }
 
     /** The folders from the highest one the person reads down to this folder, which is the last. */
@@ -142,10 +118,16 @@ final class Tree {
      * @param ownedByPerson whether the person owns an item
      */
     List<Item> sharedWithPerson(Predicate<Grant> reachesPerson, Predicate<Item> ownedByPerson) {
+        List<Item> visible = visibleItems();
+        Set<UUID> readable = new HashSet<>();
+        for (Item item : visible) {
+            readable.add(item.getId());
+        }
         List<Item> shared = new ArrayList<>();
-        for (Item item : visibleItems()) {
-            boolean inReadableFolder =
-                    item.getParentId() != null && item(item.getParentId()).map(this::level).isPresent();
+        for (Item item : visible) {
+            // A folder the person reads opens what it holds: since the kernel passes its level down,
+            // the items they read inside it are visible too, and their parent among them.
+            boolean inReadableFolder = item.getParentId() != null && readable.contains(item.getParentId());
             if (!inReadableFolder
                     && !ownedByPerson.test(item)
                     && grants(item).stream().anyMatch(reachesPerson)) {
@@ -155,18 +137,21 @@ final class Tree {
         return shared;
     }
 
-    /** The items on which the kernel gives the person a level of their own, without the folders above. */
+    /**
+     * The items the person reads, as the kernel answers them: those on which they hold a level of their
+     * own and everything inside the folders they read (MK-136).
+     */
     private List<Item> visibleItems() {
-        Set<UUID> direct = new HashSet<>();
+        Set<UUID> visible = new HashSet<>();
         for (String kind : List.of(Item.FOLDER, Item.FILE)) {
             for (String id : sharing.visible(CatalogResource.EXTENSION, kind, Levels.READ)) {
-                direct.add(UUID.fromString(id));
+                visible.add(UUID.fromString(id));
             }
         }
-        if (direct.isEmpty()) {
+        if (visible.isEmpty()) {
             return List.of();
         }
-        List<Item> found = items.findByIds(direct);
+        List<Item> found = items.findByIds(visible);
         for (Item item : found) {
             loaded.put(item.getId(), Optional.of(item));
         }
@@ -227,16 +212,15 @@ final class Tree {
                 grants(item).stream().map(grant -> grant.subject().kind()).toList()));
     }
 
+    /**
+     * The widest scope of the grants on a folder and on those above it, which reach what it holds:
+     * asked once per folder, for all the items of a list.
+     */
     private String scopeWithAbove(Item folder) {
-        String known = scopesAbove.get(folder.getId());
-        if (known != null) {
-            return known;
-        }
-        String above = folder.getParentId() == null
-                ? SharingState.SCOPES.getFirst()
-                : item(folder.getParentId()).map(this::scopeWithAbove).orElse(SharingState.SCOPES.getFirst());
-        String scope = SharingState.wider(scope(folder), above);
-        scopesAbove.put(folder.getId(), scope);
-        return scope;
+        return scopesAbove.computeIfAbsent(folder.getId(), _ -> SharingState.wider(
+                scope(folder),
+                SharingState.scopeOf(inheritedGrants(folder).stream()
+                        .map(grant -> grant.subject().kind())
+                        .toList())));
     }
 }

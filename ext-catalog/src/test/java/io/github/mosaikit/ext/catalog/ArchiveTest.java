@@ -5,7 +5,6 @@ package io.github.mosaikit.ext.catalog;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -64,15 +63,5 @@ class ArchiveTest {
         assertEquals(
                 List.of("notes.txt", "Notes (2).txt", "notes (3).txt", "notes/"),
                 entries.stream().map(Archive.Entry::path).toList());
-    }
-
-    @Test
-    void theEntriesAreKeptAsJsonWithTheirLinks() {
-        ObjectMapper mapper = new ObjectMapper();
-        List<Archive.Entry> entries = List.of(
-                new Archive.Entry("Album/", null, null, null),
-                new Archive.Entry("Album/one.txt", UUID.randomUUID(), UUID.randomUUID(), null)
-                        .signed("/api/v1/files/signed/o/e/f?expires=1&signature=s"));
-        assertEquals(entries, Archive.read(mapper, Archive.json(mapper, entries)));
     }
 }
