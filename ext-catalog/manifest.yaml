@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Massimo Antonini
+# SPDX-License-Identifier: MPL-2.0
+id: io.github.mosaikit.ext.catalog
+version: 0.1.0
+name: Catalog
+description: The file manager of an organization, with folders, sub-folders and sharing.
+kind: [app]
+platform: '>=0.1 <1'
+frontend:
+  entry: web/index.js
+  isolation: module
+contributes:
+  # The app bar of the shell (MK-025); the texts in other languages are in i18n (MK-053).
+  rail.app:
+    - id: catalog
+      title: Catalog
+      route: /app/catalog
+      element: mosaikit-ext-catalog
+      icon: web/icon.svg
+      order: 40
+      i18n:
+        it: { title: Catalogo }

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-FileCopyrightText: 2026 Massimo Antonini
+  SPDX-License-Identifier: MPL-2.0
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <!--
+      A project of its own (ADR-0001): its parent is the published parent of Mosaikit extensions, never a
+      POM of this repository (hence the empty relativePath).
+
+        mvn package    target/ext-catalog-0.1.0.zip, the package of the extension
+        mvn verify     also the tests of tests/ on the bench of @mosaikit/testing (npm test)
+
+      With Java code: remove the packaging line, add the APIs of the kernel with scope provided
+      (io.github.mosaikit:mosaikit-kernel-api and the Quarkus extensions it uses, as the samples do), and
+      declare backend.jar: lib/ext-catalog.jar in manifest.yaml.
+    -->
+    <parent>
+        <groupId>io.github.mosaikit</groupId>
+        <artifactId>mosaikit-extension-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath/>
+    </parent>
+    <groupId>io.github.mosaikit.ext</groupId>
+    <artifactId>ext-catalog</artifactId>
+    <version>0.1.0</version>
+    <packaging>pom</packaging>
+    <name>Catalog</name>
+    <description>The file manager of an organization, with folders, sub-folders and sharing.</description>
+    <url>https://github.com/mosaikit/mosaikit-ext/tree/main/ext-catalog</url>
+    <scm>
+        <url>https://github.com/mosaikit/mosaikit-ext</url>
+        <connection>scm:git:https://github.com/mosaikit/mosaikit-ext.git</connection>
+        <developerConnection>scm:git:git@github.com:mosaikit/mosaikit-ext.git</developerConnection>
+    </scm>
+</project>
