@@ -76,7 +76,8 @@ test.describe('EXT-011 all connections of an organization in one list, filtered 
     const all = await connections();
     const count = (type: string) => all.filter((connection) => connection.type === type).length;
     await page.reload();
-    await expect(typeFilter(page).locator('label')).toHaveCount(2);
+    // One value per type configured: other tests of the bench may have configured more (EXT-019).
+    await expect(typeFilter(page).locator('label')).toHaveCount(new Set(all.map((connection) => connection.type)).size);
     await expect(typeValue(page, 'Sample files').locator('.number')).toHaveText(String(count('sample-files')));
     await expect(typeValue(page, 'Sample source').locator('.number')).toHaveText(String(count('sample')));
     // The refused connector has no type, in the filter as in New connection.
@@ -90,7 +91,7 @@ test.describe('EXT-011 all connections of an organization in one list, filtered 
       count('sample-files') === 1 ? '1 connection' : `${count('sample-files')} connections`,
     );
     await typeValue(page, 'Sample source').getByRole('checkbox').check();
-    await expect(page.locator('article.card')).toHaveCount(all.length);
+    await expect(page.locator('article.card')).toHaveCount(count('sample') + count('sample-files'));
     await typeValue(page, 'Sample files').getByRole('checkbox').uncheck();
     await expect(page.locator('article.card')).toHaveCount(count('sample'));
     await expect(card(page, name)).toHaveCount(0);
