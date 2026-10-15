@@ -42,7 +42,7 @@ export const LIST_STYLE = `
  * @param {HTMLElement} container where the list page is drawn
  * @param {object} options
  * @param {(item: object) => string} options.key the identifier of an item
- * @param {{ id: string, title: string, values: (item: object) => { value: string, label: string }[] }[]} options.facets
+ * @param {{ id: string, title: string, none?: string, values: (item: object) => { value: string, label: string }[] }[]} options.facets
  *     the facets: a value is chosen among those of the items, several values of one facet add up, two
  *     facets narrow each other
  * @param {(item: object) => HTMLElement} options.card the card of an item in the grid
@@ -279,7 +279,7 @@ export class ListPage {
         if (values.length === 0) {
           const none = document.createElement('p');
           none.className = 'none';
-          none.textContent = labels.none;
+          none.textContent = facet.none ?? labels.none;
           section.append(none);
         }
         return section;

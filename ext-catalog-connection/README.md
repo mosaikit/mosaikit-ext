@@ -35,7 +35,11 @@ connections, and filters instead of navigating: several types add up. Each card 
   hue and silhouette come from a hash of the name, so that connections of one type do not look alike;
 - its **name**, and under it its **description**, or the **address of its source** when it has none
   (EXT-015);
-- its **type**, with the logo of its connector, and its **owner**;
+- its **labels**, three kinds that look different (EXT-012): its **type**, with the logo of its
+  connector, a fact that cannot be removed; its **category**, from the taxonomy of the connectors, so
+  that no connection is without one; and its **free tags**, which a person who edits it writes in its
+  detail, kept by the kernel with the generic tags of the platform (MK-097), lowercase and each once;
+- its **owner**;
 - a **selection box**, which the header counts (EXT-014);
 - the **size** of its source, the pieces at its top level as last listed, its **last update** and its
   **status**: unavailable when its connector is absent, otherwise reachable or unreachable at the last
@@ -58,6 +62,8 @@ those they edit: name, description, settings, credential and thumbnail; the type
 | `GET /api/v1/ext/connections/connections/{id}` | `view` | one connection |
 | `POST /api/v1/ext/connections/connections` | | creates one, owned by the person: `name`, `type`, `description`, `settings`, `credential` |
 | `PUT /api/v1/ext/connections/connections/{id}` | `edit` | changes `name`, `description` (empty clears it), `settings` and `credential` |
+| `PUT /api/v1/ext/connections/connections/{id}/tags` | `edit` | replaces its free tags, `{tags}`; the answer is the connection, with `tags` |
+| `GET /api/v1/ext/connections/tags?prefix=` | | the tags in use that start with the prefix, among the resources the person reads, the most used first |
 | `PUT /api/v1/ext/connections/connections/{id}/thumbnail` | `edit` | uploads the thumbnail, the image as the body with its `Content-Type` |
 | `DELETE /api/v1/ext/connections/connections/{id}/thumbnail` | `edit` | back to the generated thumbnail |
 | `POST /api/v1/ext/connections/connections/{id}/test`, `GET .../{id}/contents` | `use` | test, contents |
@@ -71,7 +77,7 @@ run as modules, not in the frame of an isolated one, so `web/list.js` stays unti
 Clicking a card, or the name of a connection in its row, opens its detail (EXT-016): a panel over the
 list, on the right edge of the area of the app and as high as it, so that the cards do not move. Its
 header (thumbnail and name) and the facts of the connection (type, category, description, address,
-owner, and the place of its tags) stay in place while the pieces of the connection (EXT-019) scroll
+owner, and its labels: type, category and free tags, added and removed there) stay in place while the pieces of the connection (EXT-019) scroll
 under them; the actions on the connection (edit, test) stay at the bottom. Clicking the same card
 again, clicking outside the panel, Escape or its close button close it; clicking another card shows
 that card's detail. The open card, or row, is marked as selected and has `aria-current`, and the name
