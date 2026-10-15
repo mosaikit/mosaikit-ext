@@ -74,6 +74,10 @@ notes are the section of that version in the extension's `CHANGELOG.md`.
 2. `python tools/release.py check ext-<name>/vX.Y.Z` passes; merge.
 3. A maintainer tags the merged commit and pushes the tag.
 
+The tag runs `.github/workflows/release.yml`: it checks the tag, runs `mvn verify` in that folder
+only, signs and publishes the POM and the zip to Maven Central (environment `release`, with the
+secrets of the release of Mosaikit), and last creates the GitHub release with the zip and the notes.
+
 `tools/release.py` (`pip install pyyaml`) holds what a release decides, and the release workflow only
 calls it: `check` refuses a tag whose version differs from the build, the manifest or `package.json`,
 a version without its changelog section, a parent POM that is still a snapshot, or a required
