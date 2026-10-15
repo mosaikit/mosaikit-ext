@@ -111,6 +111,8 @@ public class ConnectionResource {
      * @param titles the title in other languages, by language tag
      * @param logo the address of the logo, served by the kernel with the assets of the extension
      * @param form the JSON Schema of the connection form
+     * @param kinds the kinds of pieces its sources hold, declared or usual for its category, empty when
+     *     unknown: the source picker offers the type to the editors whose uses take one of them (EXT-026)
      */
     public record ConnectorView(
             String type,
@@ -119,7 +121,8 @@ public class ConnectionResource {
             Map<String, String> titles,
             String category,
             String logo,
-            Map<String, Object> form) {}
+            Map<String, Object> form,
+            List<String> kinds) {}
 
     /** A connector the framework refused, naming the extension and the field of its declaration. */
     public record ProblemView(String extension, String field, String message) {}
@@ -186,6 +189,8 @@ public class ConnectionResource {
      *     {@code null} before
      * @param checked when its source was last tested or listed, {@code null} before
      * @param tags its free tags, lowercase and each once, in alphabetical order (EXT-012)
+     * @param usable whether the person may browse it and use its pieces, which the source picker offers
+     *     only then (EXT-026)
      */
     public record ConnectionView(
             UUID id,
@@ -206,7 +211,8 @@ public class ConnectionResource {
             boolean morePieces,
             String state,
             Instant checked,
-            List<String> tags) {}
+            List<String> tags,
+            boolean usable) {}
 
     /** The free tags of a connection, to replace them all (EXT-012). */
     public record TagsChange(List<String> tags) {}
@@ -250,6 +256,46 @@ public class ConnectionResource {
     /** A query to run on a connection, with its row limit. */
     public record QueryRequest(String statement, Integer limit) {}
 
+    /**
+     * A reference to a connection, as the registry of resources of the kernel knows it (MK-135): the
+     * extension of the framework, the type {@code connection} and its id.
+     */
+    public record ConnectionRef(String extension, String type, String id) {}
+
+    /**
+     * A reference to a piece of a connection (EXT-026): its id and the ids of the containers above it,
+     * from the top level, never its address.
+     */
+    public record PartRef(String id, List<String> parents) {}
+
+    /** What the source picker returns (EXT-026): a connection and one of its pieces, by their ids. */
+    public record SourceRef(ConnectionRef connection, PartRef part) {}
+
+    /** The references to resolve, at most {@value #MAX_REFERENCES}. */
+    public record ResolveRequest(List<SourceRef> references) {}
+
+    /**
+     * A reference resolved for the person (EXT-026), as it is now.
+     *
+     * @param status {@code available}; {@code deleted} (no such connection); {@code forbidden} (the person
+     *     may not use it); {@code connector-absent} (its connector is not active, the connection is kept);
+     *     {@code part-missing} (its source no longer holds the piece); or a state of the contents that is
+     *     not {@code listed}, such as {@code unreachable}
+     * @param connection the connection as it is now, with the address of its source, when the person views it
+     * @param part the piece as it is now, with its facts, when it is available
+     * @param detail what the source or the connector said, when there is something to say
+     */
+    public record ResolvedSource(String status, ConnectionView connection, Piece part, String detail) {}
+
+    /** The answer of a resolution, in the order of the request. */
+    public record ResolvedSources(List<ResolvedSource> references) {}
+
+    /** The most references resolved by one request. */
+    static final int MAX_REFERENCES = 100;
+
+    /** The most pages of a container read to find a piece. */
+    static final int MAX_PAGES = 20;
+
     private final Connections connections;
     private final ConnectorCatalog catalog;
     private final CurrentOrganization organization;
@@ -288,7 +334,7 @@ public class ConnectionResource {
         Discovery discovery = catalog.discover();
         return new ConnectorsView(
                 discovery.connectors().values().stream()
-                        .map(found -> view(found.connector().extension(), found.declaration()))
+                        .map(found -> view(found.connector(), found.declaration()))
                         .toList(),
                 discovery.problems().stream()
                         .map(problem -> new ProblemView(problem.extension(), problem.field(), problem.message()))
@@ -620,6 +666,80 @@ public class ConnectionResource {
         });
     }
 
+    /**
+     * Resolves the references that the source picker returned to other extensions (EXT-026): each
+     * connection and piece as they are now, so that whoever keeps a reference follows a change of the
+     * address of its source, or learns why it is not available. The person must use the connection.
+     */
+    @POST
+    @Path("references/resolve")
+    @Transactional
+    public ResolvedSources resolve(ResolveRequest request) {
+        if (request == null || request.references() == null) {
+            throw problem(Response.Status.BAD_REQUEST, "The references to resolve are required");
+        }
+        if (request.references().size() > MAX_REFERENCES) {
+            throw problem(Response.Status.BAD_REQUEST, "At most " + MAX_REFERENCES + " references at a time");
+        }
+        Discovery discovery = catalog.discover();
+        return new ResolvedSources(request.references().stream()
+                .map(reference -> resolve(reference, discovery))
+                .toList());
+    }
+
+    private ResolvedSource resolve(SourceRef reference, Discovery discovery) {
+        if (reference == null || reference.connection() == null || reference.part() == null || reference.part().id() == null
+                || !EXTENSION.equals(reference.connection().extension()) || !TYPE.equals(reference.connection().type())) {
+            throw problem(Response.Status.BAD_REQUEST, "Each reference names a connection of " + EXTENSION + " and a part");
+        }
+        Optional<Connection> found;
+        try {
+            found = connections.findById(UUID.fromString(reference.connection().id()));
+        } catch (IllegalArgumentException | NullPointerException e) {
+            found = Optional.empty();
+        }
+        if (found.isEmpty()) {
+            return new ResolvedSource("deleted", null, null, null);
+        }
+        Connection connection = found.get();
+        ResourceRef ref = ref(connection.getId());
+        if (!sharing.allows(ref, USE)) {
+            return new ResolvedSource("forbidden", null, null, null);
+        }
+        ConnectionView view = view(connection, discovery);
+        Optional<Discovery.Found> connector = discovery.connector(connection.getType());
+        if (connector.isEmpty()) {
+            return new ResolvedSource("connector-absent", view, null, connection.getConnector());
+        }
+        List<String> parents = reference.part().parents() == null ? List.of() : reference.part().parents();
+        String parent = parents.isEmpty() ? "" : parents.getLast();
+        String id = reference.part().id();
+        try {
+            return withSettings(connection.getSettings(), connection.getCredential(), settings -> {
+                for (int page = 0; page < MAX_PAGES; page++) {
+                    Page<Piece> pieces;
+                    try {
+                        pieces = connector.get().connector().list(settings, parent, new Paging(page * MAX_PAGE, MAX_PAGE));
+                    } catch (ContentsUnavailableException e) {
+                        return new ResolvedSource(ContentsView.unavailable(parent, e).state(), view, null, e.getMessage());
+                    } catch (IllegalArgumentException e) {
+                        return new ResolvedSource("part-missing", view, null, null);
+                    }
+                    Optional<Piece> piece = pieces.items().stream().filter(item -> id.equals(item.id())).findFirst();
+                    if (piece.isPresent()) {
+                        return new ResolvedSource("available", view, piece.get(), null);
+                    }
+                    if (!pieces.more()) {
+                        break;
+                    }
+                }
+                return new ResolvedSource("part-missing", view, null, null);
+            });
+        } catch (NoSuchCredential e) {
+            return new ResolvedSource("unreachable", view, null, e.getMessage());
+        }
+    }
+
     private TestResult test(Connector connector, Map<String, Object> values, String credential) {
         try {
             return withSettings(values, credential, connector::test);
@@ -751,7 +871,8 @@ public class ConnectionResource {
         return credential == null || credential.isBlank() ? null : credential.strip();
     }
 
-    private static ConnectorView view(String extension, Declaration declaration) {
+    private static ConnectorView view(Connector connector, Declaration declaration) {
+        String extension = connector.extension();
         return new ConnectorView(
                 declaration.type(),
                 extension,
@@ -759,7 +880,8 @@ public class ConnectionResource {
                 declaration.titles() == null ? Map.of() : declaration.titles(),
                 declaration.category(),
                 "/api/v1/extension-assets/" + extension + "/" + declaration.logo(),
-                declaration.form());
+                declaration.form(),
+                Kinds.of(connector, declaration));
     }
 
     /** A connection with its owner as the kernel keeps it. */
@@ -788,7 +910,8 @@ public class ConnectionResource {
                 connection.hasMorePieces(),
                 connection.getSourceState(),
                 connection.getCheckedAt(),
-                tagsOf(connection));
+                tagsOf(connection),
+                sharing.allows(ref(connection.getId()), USE));
     }
 
     /** The free tags of a connection, empty when the kernel has no entry for it. */

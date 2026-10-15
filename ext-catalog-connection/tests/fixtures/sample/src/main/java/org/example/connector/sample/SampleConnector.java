@@ -15,6 +15,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * A connector of the tests of the connection framework (EXT-010, EXT-019): a database with a few pieces
@@ -73,6 +74,12 @@ public class SampleConnector implements Connector {
                         "properties", Map.of(
                                 "host", Map.of("type", "string", "title", "Host"),
                                 "port", Map.of("type", "integer", "title", "Port", "default", 9000))));
+    }
+
+    /** The kinds of its pieces, declared rather than taken from its category (EXT-026). */
+    @Override
+    public Set<String> kinds() {
+        return Set.of("schema", "table", "folder");
     }
 
     @Override

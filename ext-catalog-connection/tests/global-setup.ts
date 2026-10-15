@@ -7,7 +7,8 @@ import { Bench, freePort, packagesIn } from '@mosaikit/testing';
  * organization and two people, and stops it after the tests. Next to it, the extensions of the tests
  * (tests/fixtures): the connectors built by mvn package, a sample database and a connector whose
  * declaration lacks a field (EXT-010), a sample stream and API (EXT-019), and an extension that
- * contributes uses of the pieces of connections, installed as a directory (EXT-019); no other extension
+ * contributes uses of the pieces of connections (EXT-019) and an editor that opens the source picker
+ * (EXT-026), installed as directories; no other extension
  * of the repository is installed (ADR-0001). The installation is downloaded once;
  * MOSAIKIT_INSTALLATION chooses another one, such as a build of Mosaikit.
  */
@@ -23,7 +24,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   }
   const bench = await Bench.start({
     work: '.mosaikit-bench',
-    extensions: [...own, ...connectors, 'tests/fixtures/consumer'],
+    extensions: [...own, ...connectors, 'tests/fixtures/consumer', 'tests/fixtures/editor'],
     // The package is not signed by a publisher in the tests: its frontend runs like a verified one.
     settings: { 'mosaikit.extensions.unverified-frontends': 'module' },
     // The tests remove a connector and install it again, restarting the installation.

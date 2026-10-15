@@ -17,11 +17,13 @@ one `EXT-nnn.md` each, and its changes in [`CHANGELOG.md`](CHANGELOG.md).
 | `db/` | the migrations of the schema `ext_catalog_connection` |
 | `web/index.js` | the app, a custom element the shell renders at `/app/connections` |
 | `web/list.js` | the list page of the app: header with the count and the grid/rows switch, the column of filters, cards and rows |
+| `web/split.js` | the column of filters that the person widens: the resizable pane of the UI kit, or a handle of its own where the shell does not define it |
+| `web/picker.js` | the source picker that the editors of other extensions open (EXT-026) |
 | `web/thumbnail.js` | the thumbnails generated from the names of the connections |
 | `web/i18n.js` | the texts of the app in English and Italian, chosen by `context.locale` |
 | `pom.xml` | the build, on the parent of Mosaikit extensions `io.github.mosaikit:mosaikit-extension-parent` |
 | `package.json`, `playwright.config.ts`, `tests/` | the bench of `@mosaikit/testing` and the Playwright tests |
-| `tests/fixtures/` | the extensions of the tests: connectors built with the framework (a sample source with two types, sample source and sample files, a sample stream and API, one whose declaration lacks a field) and an extension that contributes uses of pieces |
+| `tests/fixtures/` | the extensions of the tests: connectors built with the framework (a sample source with two types, sample source and sample files, a sample stream and API, one whose declaration lacks a field), an extension that contributes uses of pieces and an editor that opens the source picker |
 | `docs/requirements/` | the requirements of this extension |
 
 ## The list of connections
@@ -58,7 +60,7 @@ those they edit: name, description, settings, credential and thumbnail; the type
 
 | Request | Level | Answer |
 |---|---|---|
-| `GET /api/v1/ext/connections/connections` | `view` | the connections, with `description`, `address`, `owner`, `thumbnail`, `editable`, `updated`, `pieces`, `morePieces`, `state` and `checked` |
+| `GET /api/v1/ext/connections/connections` | `view` | the connections, with `description`, `address`, `owner`, `thumbnail`, `editable`, `usable`, `updated`, `pieces`, `morePieces`, `state` and `checked` |
 | `GET /api/v1/ext/connections/connections/{id}` | `view` | one connection |
 | `POST /api/v1/ext/connections/connections` | | creates one, owned by the person: `name`, `type`, `description`, `settings`, `credential` |
 | `PUT /api/v1/ext/connections/connections/{id}` | `edit` | changes `name`, `description` (empty clears it), `settings` and `credential` |
@@ -68,10 +70,15 @@ those they edit: name, description, settings, credential and thumbnail; the type
 | `DELETE /api/v1/ext/connections/connections/{id}/thumbnail` | `edit` | back to the generated thumbnail |
 | `POST /api/v1/ext/connections/connections/preview` | | tests settings before creating: `{success, message, address, contents}`, the first pieces of the source when it answers |
 | `POST /api/v1/ext/connections/connections/{id}/test`, `GET .../{id}/contents` | `use` | test, contents |
+| `POST /api/v1/ext/connections/references/resolve` | `use` | the references of the source picker as they are now, at most 100: `{references: [{connection, part}]}` answers, in order, `{status, connection, part, detail}` |
 
 The list page has the shape of the list page of the UI kit of Mosaikit (MK-105) and takes the same
 inputs (facets, card, columns). The shell defines the elements of the kit only for the frontends that
-run as modules, not in the frame of an isolated one, so `web/list.js` stays until the frame has them too.
+run as modules, not in the frame of an isolated one (mosaikit/mosaikit#173), so `web/list.js` stays
+until the frame has them too. The column of filters is as wide as the person makes it, by dragging its
+edge or with the keyboard on its handle (arrows, Shift for larger steps, Home and End), and the browser
+keeps the width: the resizable pane of the kit, `<mk-split-pane>`, where the shell defines it, or a
+handle of `web/split.js` that behaves the same way in a frame.
 
 ## Adding a connection
 
@@ -89,6 +96,51 @@ Edit command of its detail (EXT-017), takes the second and third steps, filled i
 the change starts from the settings the server returned and changes only those the form shows, and
 saving shows the new values on the card and in the detail, which opens again, without reloading the
 page.
+
+## The source picker
+
+The editors of the other extensions ask "what data do I put here" in one place (EXT-026): the source
+picker, the view of the connections itself in a dialog, with its filters, the connections as cards and
+the pieces of the chosen one. Each editor opens it in its own **context**, its uses of pieces (the
+contributions of its extension to `catalog.connection.use`, or some of them): the Type filter keeps the
+types whose sources hold a kind that those uses take, the connections the person cannot use are left
+out, and only the pieces that one of the uses takes can be chosen, containers leading to them. The kinds
+of a type are those its connector declares with `Connector.kinds`, or those usual for its category
+(`database` and `warehouse`: schema, table, view; `lake` and `files`: folder, file; `api`: endpoint;
+`stream`: topic); a connector of a category of its own that declares none is offered to every editor.
+
+The contract (MK-134), version 1, is the element `mosaikit-ext-catalog-connection-picker`, which the
+framework defines in the page of the shell for the extensions that run as modules; an extension that
+uses it lists the framework among its `optional` extensions and checks that it is active (MK-133):
+
+```js
+const picker = document.createElement('mosaikit-ext-catalog-connection-picker');
+picker.extension = context.extension.id; // the uses of this extension
+picker.uses = ['chart'];                 // optional: some of them only
+picker.multiple = true;                  // optional: several pieces, one by default
+const references = await picker.pick();  // null when the person closes it without choosing
+```
+
+The picker adds itself to the page while it is open and dispatches `pick` (with `{references}`) or
+`pickcancel`. Each reference is kept by the editor instead of a copy of the source:
+
+```json
+{
+  "connection": { "extension": "io.github.mosaikit.ext.catalog.connection", "type": "connection", "id": "…" },
+  "part": { "id": "sales/customers", "parents": ["sales"], "name": "customers", "kind": "table" },
+  "uses": ["chart"]
+}
+```
+
+`connection` is the reference of the connection in the registry of resources of the platform, which
+`watchReferences` of the SDK resolves and `<mk-reference-placeholder>` shows when the framework is
+absent (MK-135); `part` names the piece by the ids of the connector, never by the address of the source.
+`POST /api/v1/ext/connections/references/resolve` gives each reference as it is now: `available` with
+the connection, its current address, and the piece with its facts; `deleted`, `forbidden`,
+`connector-absent`, `part-missing`, or the state of a source that cannot be listed (`unreachable`, …).
+So a later change of the address of a source is followed by every reference to it. A breaking change
+of the contract will be a new element, `…-picker-2`, served next to this one. An editor isolated in a
+frame cannot open the picker yet: the element is defined in the page of the shell, not in the frame.
 
 ## The detail of a connection
 
