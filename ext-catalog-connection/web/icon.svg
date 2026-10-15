@@ -1,0 +1,9 @@
+<!-- SPDX-FileCopyrightText: 2026 Massimo Antonini -->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <rect width="24" height="24" rx="6" fill="#3654c9"/>
+  <g fill="none" stroke="#ffffff" stroke-width="1.8">
+    <ellipse cx="12" cy="7.5" rx="5.5" ry="2"/>
+    <path d="M6.5 7.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9M6.5 12c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/>
+  </g>
+</svg>
